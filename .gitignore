@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+# Misc files
+.DS_Store
+.idea
