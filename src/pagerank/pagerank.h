@@ -2,7 +2,7 @@
 // Created by Michelle Zhou on 1/17/22.
 //
 
-#ifndef PIERANK_PAGERANK_H
-#define PIERANK_PAGERANK_H
+#ifndef PIERANK_PAGERANK_H_
+#define PIERANK_PAGERANK_H_
 
-#endif //PIERANK_PAGERANK_H
+#endif //PIERANK_PAGERANK_H_

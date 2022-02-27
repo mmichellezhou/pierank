@@ -1,6 +1,10 @@
 //
 // Created by Michelle Zhou on 2/12/22.
 //
+
+#ifndef PIERANK_MATRIX_MARKET_IO_H_
+#define PIERANK_MATRIX_MARKET_IO_H_
+
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -15,7 +19,8 @@ public:
   }
 
   bool CheckBanner() {
-    std::vector<std::string> words = {"%%MatrixMarket", "matrix", "coordinate", "pattern", "general"};
+    std::vector<std::string> words = {"%%MatrixMarket", "matrix", "coordinate",
+                                      "pattern", "general"};
     for (const auto &word : words) {
       std::string temp;
       is_ >> temp;
@@ -62,3 +67,5 @@ private:
   bool ok_;
   uint64_t count_;
 };
+
+#endif //PIERANK_MATRIX_MARKET_IO_H_
