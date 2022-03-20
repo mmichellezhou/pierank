@@ -37,12 +37,12 @@ public:
     index_.Append(nnz_);
   }
 
-  PosType NumNonZeros() const { return nnz_; }
+  IdxType NumNonZeros() const { return nnz_; }
 
 private:
   FlexIndex<IdxType> index_;
   FlexIndex<PosType> pos_;
-  PosType nnz_ = 0;
+  IdxType nnz_ = 0;
 };
 
 #endif //PIERANK_SPARSE_MATRIX_H_
