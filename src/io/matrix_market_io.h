@@ -65,7 +65,7 @@ private:
   uint64_t nnz_;
   std::ifstream is_;
   bool ok_;
-  uint64_t count_;
+  uint64_t count_ = 0;
 };
 
 #endif //PIERANK_MATRIX_MARKET_IO_H_
