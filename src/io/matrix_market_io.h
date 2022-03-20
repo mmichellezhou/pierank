@@ -51,7 +51,7 @@ public:
     return cols_;
   }
 
-  uint64_t NNZ() const {
+  uint64_t NumNonZeros() const {
     return nnz_;
   }
 
