@@ -14,6 +14,10 @@
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
+  using FlexIdxType = FlexIndex<IdxType>;
+
+  using FlexPosType = FlexIndex<PosType>;
+
   SparseMatrix(const std::string &matrix_market_file_path) {
     MatrixMarketIo mat(matrix_market_file_path);
     CHECK(mat.Ok()) << "Fail to open file: " << matrix_market_file_path;
@@ -38,6 +42,10 @@ public:
   }
 
   IdxType NumNonZeros() const { return nnz_; }
+
+  const FlexIdxType &Index() const { return index_; }
+
+  const FlexPosType &Pos() const { return pos_; }
 
 private:
   FlexIndex<IdxType> index_;
