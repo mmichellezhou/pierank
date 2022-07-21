@@ -46,7 +46,11 @@ public:
 
   const FlexIdxType &Index() const { return index_; }
 
+  IdxType Index(PosType pos) const { return index_[pos]; }
+
   const FlexPosType &Pos() const { return pos_; }
+
+  PosType Pos(IdxType idx) const { return pos_[idx]; }
 
   IdxType NumNonZeros() const { return nnz_; }
 

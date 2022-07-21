@@ -18,15 +18,15 @@
 #include <vector>
 
 template<typename T = double, typename PosType = uint32_t, typename IdxType = uint64_t>
-class PageRank {
+class PageRank : public SparseMatrix<PosType, IdxType> {
 public:
   PageRank(const std::string &file_path, T damping_factor = 0.85,
            uint32_t max_iterations = 30, T epsilon = 1e-6) :
-      damping_factor_(damping_factor), mtx_(file_path),
-      index_(mtx_.Index()), pos_(mtx_.Pos()), rows_(mtx_.Rows()),
-      cols_(mtx_.Cols()), num_pages_(std::max(rows_, cols_)),
+           SparseMatrix<PosType, IdxType>(file_path),
+      damping_factor_(damping_factor),
+      num_pages_(std::max(this->Rows(), this->Cols())),
       one_minus_d_over_n_((1 - damping_factor_) / num_pages_),
-      scores_(num_pages_, one_minus_d_over_n_), out_degree_(rows_),
+      scores_(num_pages_, one_minus_d_over_n_), out_degree_(this->Rows()),
       max_iterations_(max_iterations), epsilon_(epsilon) {
     NumOutboundLinks();
   }
@@ -46,8 +46,8 @@ public:
    * idx = [0, 2, 4, 6, 8, 9]
    */
   void NumOutboundLinks() {
-    for (PosType nz = 0; nz < mtx_.NumNonZeros(); nz++) {
-      out_degree_[pos_[nz]]++;
+    for (PosType nz = 0; nz < this->NumNonZeros(); nz++) {
+      out_degree_[this->Pos(nz)]++;
     }
   }
 
@@ -59,13 +59,13 @@ public:
     for (iter = 0; iter < max_iterations_; ++iter) {
       epsilon = 0.0;
 
-      for (uint64_t p = 0; p < mtx_.Cols(); ++p) {
+      for (uint64_t p = 0; p < this->Cols(); ++p) {
         T sum = 0.0;
 
-        for (uint64_t i = index_[p]; i < index_[p + 1]; ++i) {
-          DCHECK_GT(out_degree_[pos_[i]], 0);
-          DCHECK_LT(pos_[i], scores_.size());
-          sum += scores_[pos_[i]] / out_degree_[pos_[i]];
+        for (uint64_t i = this->Index(p); i < this->Index(p + 1); ++i) {
+          DCHECK_GT(out_degree_[this->Pos(i)], 0);
+          DCHECK_LT(this->Pos(i), scores_.size());
+          sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
         }
 
         T score = one_minus_d_over_n_ + damping_factor_ * sum;
@@ -115,11 +115,6 @@ protected:
 
 private:
   T damping_factor_;
-  SparseMatrix<uint32_t, uint64_t> mtx_;
-  FlexIndex<IdxType> index_;
-  FlexIndex<PosType> pos_;
-  uint32_t rows_;
-  uint32_t cols_;
   uint64_t num_pages_;
   T one_minus_d_over_n_;
   std::vector<T> scores_;
