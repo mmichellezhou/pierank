@@ -14,11 +14,11 @@ TEST(SparseMatrix, Read) {
   auto pos = mat.Pos();
 
   // test the list of non-zero rows for 1st column
-  for (uint32_t idx = 0; idx < index[1]; ++idx)
+  for (uint64_t idx = 0; idx < index[1]; ++idx)
     EXPECT_EQ(pos[index[0] + idx], idx);
 
   // test the list of non-zero rows for the last column (85th)
   vector<uint32_t> row_ids = {164, 171, 218};
-  for (uint32_t idx = index[84]; idx < index[85]; ++idx)
+  for (uint64_t idx = index[84]; idx < index[85]; ++idx)
     EXPECT_EQ(pos[idx], row_ids[idx - index[84]]);
 }

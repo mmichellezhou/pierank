@@ -21,7 +21,10 @@ public:
   SparseMatrix(const std::string &matrix_market_file_path) {
     MatrixMarketIo mat(matrix_market_file_path);
     CHECK(mat.Ok()) << "Fail to open file: " << matrix_market_file_path;
-    DLOG(INFO) << "NumNonZeros: " << mat.NumNonZeros();
+    // DLOG(INFO) << "NumNonZeros: " << mat.NumNonZeros();
+
+    rows_ = mat.Rows();
+    cols_ = mat.Cols();
 
     PosType col = std::numeric_limits<PosType>::max();
 
@@ -41,16 +44,22 @@ public:
     index_.Append(nnz_);
   }
 
-  IdxType NumNonZeros() const { return nnz_; }
-
   const FlexIdxType &Index() const { return index_; }
 
   const FlexPosType &Pos() const { return pos_; }
+
+  IdxType NumNonZeros() const { return nnz_; }
+
+  uint32_t Rows() const { return rows_; }
+
+  uint32_t Cols() const { return cols_; }
 
 private:
   FlexIndex<IdxType> index_;
   FlexIndex<PosType> pos_;
   IdxType nnz_ = 0;
+  uint32_t rows_ = 0;
+  uint32_t cols_ = 0;
 };
 
 #endif //PIERANK_SPARSE_MATRIX_H_
