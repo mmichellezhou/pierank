@@ -5,21 +5,26 @@
 #ifndef PIERANK_PAGERANK_H_
 #define PIERANK_PAGERANK_H_
 
-#include <limits>
-#include <glog/logging.h>
-
-#include "sparse_matrix.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
+
+#include <glog/logging.h>
+
+#include "sparse_matrix.h"
+#include "thread_pool.h"
 
 template<typename T = double, typename PosType = uint32_t, typename IdxType = uint64_t>
 class PageRank : public SparseMatrix<PosType, IdxType> {
 public:
+  using PosRange = typename SparseMatrix<PosType, IdxType>::PosRange;
+
+  using PosRanges = typename SparseMatrix<PosType, IdxType>::PosRanges;
+
   PageRank(const std::string &file_path, T damping_factor = 0.85,
            uint32_t max_iterations = 30, T epsilon = 1e-6) :
            SparseMatrix<PosType, IdxType>(file_path),
@@ -52,32 +57,27 @@ public:
   }
 
   // Returns <epsilon, num_iterations> pair
-  std::pair<T, uint32_t> Run() {
-    T epsilon;
+  std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
+    const auto ranges = SplitCols(pool);
+    epsilons_.resize(ranges.size());
+
     uint32_t iter;
-
     for (iter = 0; iter < max_iterations_; ++iter) {
-      epsilon = 0.0;
-
-      for (uint64_t p = 0; p < this->Cols(); ++p) {
-        T sum = 0.0;
-
-        for (uint64_t i = this->Index(p); i < this->Index(p + 1); ++i) {
-          DCHECK_GT(out_degree_[this->Pos(i)], 0);
-          DCHECK_LT(this->Pos(i), scores_.size());
-          sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
-        }
-
-        T score = one_minus_d_over_n_ + damping_factor_ * sum;
-        epsilon = std::max(epsilon, std::fabs(scores_[p] - score));
-        scores_[p] = score;
+      if (!pool) {
+        DCHECK_EQ(ranges.size(), 1);
+        DoRange(ranges[0], 0);
+      } else {
+        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+          [this, &ranges](uint64_t first, uint64_t last) {
+            for (auto r = first; r < last; ++r)
+              DoRange(ranges[r], /*range_id=*/r);
+        });
       }
-
-      if (epsilon < epsilon_)
+      if (MaxEpsilon() < epsilon_)
         break;
     }
 
-    return std::make_pair(epsilon, std::min(iter + 1, max_iterations_));
+    return std::make_pair(MaxEpsilon(), std::min(iter + 1, max_iterations_));
   }
 
   std::vector<std::pair<T, uint32_t>> TopK(uint32_t k = 100) {
@@ -113,11 +113,51 @@ protected:
     return res;
   }
 
+  void DoRange(const PosRange &range, uint32_t range_id) {
+    const auto first = range.first;
+    const auto last = range.second;
+    DCHECK_LT(first, last);
+    T epsilon = 0.0;
+    for (PosType p = first; p < last; ++p) {
+      T sum = 0.0;
+
+      for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
+        DCHECK_GT(out_degree_[this->Pos(i)], 0);
+        DCHECK_LT(this->Pos(i), scores_.size());
+        sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
+      }
+
+      T score = one_minus_d_over_n_ + damping_factor_ * sum;
+      epsilon = std::max(epsilon, std::fabs(scores_[p] - score));
+      scores_[p] = score;
+    }
+
+    epsilons_[range_id] = epsilon;
+  }
+
+  T MaxEpsilon() const {
+    return *std::max_element(epsilons_.begin(), epsilons_.end());
+  }
+
+  PosRanges SplitCols(std::shared_ptr<ThreadPool> pool = nullptr) const {
+    DCHECK_GT(this->Cols(), 0);
+    if (!pool)
+      return {std::make_pair(0, this->Cols())};
+    PosRanges res;
+    PosType range_size = (this->Cols() + pool->Size() - 1) / pool->Size();
+    for (PosType first = 0; first < this->Cols(); first += range_size) {
+      PosType last = std::min(first + range_size, this->Cols());
+      res.push_back(std::make_pair(first, last));
+    }
+    return res;
+  }
+
 private:
   T damping_factor_;
   uint64_t num_pages_;
   T one_minus_d_over_n_;
   std::vector<T> scores_;
+  std::vector<T> epsilons_;
   std::vector<uint32_t> out_degree_;
   uint32_t max_iterations_;
   T epsilon_;

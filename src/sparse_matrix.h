@@ -14,6 +14,10 @@
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
+  using PosRange = std::pair<PosType, PosType>;
+
+  using PosRanges = std::vector<std::pair<PosType, PosType>>;
+
   using FlexIdxType = FlexIndex<IdxType>;
 
   using FlexPosType = FlexIndex<PosType>;
@@ -54,16 +58,16 @@ public:
 
   IdxType NumNonZeros() const { return nnz_; }
 
-  uint32_t Rows() const { return rows_; }
+  PosType Rows() const { return rows_; }
 
-  uint32_t Cols() const { return cols_; }
+  PosType Cols() const { return cols_; }
 
 private:
-  FlexIndex<IdxType> index_;
-  FlexIndex<PosType> pos_;
+  FlexIdxType index_;
+  FlexPosType pos_;
   IdxType nnz_ = 0;
-  uint32_t rows_ = 0;
-  uint32_t cols_ = 0;
+  PosType rows_ = 0;
+  PosType cols_ = 0;
 };
 
 #endif //PIERANK_SPARSE_MATRIX_H_

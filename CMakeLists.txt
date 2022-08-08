@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.2)
 
 project(pierank)
 
+find_package(Threads REQUIRED)
 find_package(glog 0.4.0 REQUIRED)
 include_directories(${glog_DIR} ${gflags_INCLUDE_DIR})
 

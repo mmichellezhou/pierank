@@ -43,6 +43,8 @@ public:
 
   ~ThreadPool();
 
+  inline uint32_t Size() const { return workers_.size(); }
+
   // ParallelFor executes f with [0, num_items) arguments in parallel and
   // waits for completion. `f` accepts a half-open interval [first, last).
   inline void ParallelFor(uint64_t num_items, uint64_t items_per_thread,
@@ -59,9 +61,9 @@ public:
 
 private:
   // need to keep track of threads so we can join them
-  std::vector <std::thread> workers_;
+  std::vector<std::thread> workers_;
   // the task queue
-  std::queue <std::function<void()>> tasks_;
+  std::queue<std::function<void()>> tasks_;
 
   // synchronization
   std::mutex queue_mutex_;
@@ -70,8 +72,7 @@ private:
 };
 
 // the constructor just launches some amount of workers
-inline ThreadPool::ThreadPool(size_t threads)
-    : stop_(false) {
+inline ThreadPool::ThreadPool(size_t threads) : stop_(false) {
   for (size_t i = 0; i < threads; ++i)
     workers_.emplace_back(
         [this] {
