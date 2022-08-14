@@ -4,10 +4,11 @@
 
 #include "gtest/gtest.h"
 
-#include "pagerank.h"
-#include "thread_pool.h"
+#include "pierank/pierank.h"
 
 using namespace std;
+
+using namespace pierank;
 
 TEST(PageRankTest, RankAsh219) {
   string file_path = "../../data/ash219.mtx";

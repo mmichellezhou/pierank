@@ -2,10 +2,12 @@
 // Created by Michelle Zhou on 2/26/22.
 //
 
-#include "sparse_matrix.h"
 #include "gtest/gtest.h"
+#include "pierank/pierank.h"
 
 using namespace std;
+
+using namespace pierank;
 
 TEST(SparseMatrix, Read) {
   SparseMatrix<uint32_t, uint64_t> mat("../../data/ash219.mtx");

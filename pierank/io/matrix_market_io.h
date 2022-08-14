@@ -2,8 +2,8 @@
 // Created by Michelle Zhou on 2/12/22.
 //
 
-#ifndef PIERANK_MATRIX_MARKET_IO_H_
-#define PIERANK_MATRIX_MARKET_IO_H_
+#ifndef PIERANK_IO_MATRIX_MARKET_IO_H_
+#define PIERANK_IO_MATRIX_MARKET_IO_H_
 
 #include <cstdint>
 #include <fstream>
@@ -14,8 +14,22 @@ class MatrixMarketIo {
 public:
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
     ok_ = static_cast<bool>(is_) && CheckBanner();
-    if (ok_)
+    if (ok_) {
+      SkipComments();
       is_ >> rows_ >> cols_ >> nnz_;
+    }
+  }
+
+  void SkipComments() {
+    std::string line;
+    while (true) {
+      auto pos = is_.tellg();
+      getline(is_, line);
+      if (line[0] != '%') {
+        is_.seekg(pos, std::ios_base::beg);
+        return;
+      }
+    }
   }
 
   bool CheckBanner() {
@@ -26,7 +40,7 @@ public:
       is_ >> temp;
       if (temp != word) return false;
     }
-
+    is_.ignore();  // skip the new line character
     return true;
   }
 
@@ -68,4 +82,4 @@ private:
   uint64_t count_ = 0;
 };
 
-#endif //PIERANK_MATRIX_MARKET_IO_H_
+#endif //PIERANK_IO_MATRIX_MARKET_IO_H_

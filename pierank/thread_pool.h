@@ -33,6 +33,8 @@ claim that you wrote the original software. If you use this software
 #include <functional>
 #include <stdexcept>
 
+namespace pierank {
+
 class ThreadPool {
 public:
   ThreadPool(size_t);
@@ -49,7 +51,7 @@ public:
   // waits for completion. `f` accepts a half-open interval [first, last).
   inline void ParallelFor(uint64_t num_items, uint64_t items_per_thread,
                           std::function<void(uint64_t, uint64_t)> fn) {
-    std::vector <std::future<void>> results;
+    std::vector<std::future<void>> results;
     for (uint64_t first = 0; first < num_items; first += items_per_thread) {
       uint64_t last = std::min<uint64_t>(first + items_per_thread, num_items);
       results.emplace_back(Enqueue([&fn, first, last] { fn(first, last); }));
@@ -80,7 +82,7 @@ inline ThreadPool::ThreadPool(size_t threads) : stop_(false) {
             std::function<void()> task;
 
             {
-              std::unique_lock <std::mutex> lock(this->queue_mutex_);
+              std::unique_lock<std::mutex> lock(this->queue_mutex_);
               this->condition_.wait(lock,
                                     [this] {
                                       return this->stop_ ||
@@ -104,13 +106,13 @@ auto ThreadPool::Enqueue(F &&f, Args &&... args)
 -> std::future<typename std::result_of<F(Args...)>::type> {
   using return_type = typename std::result_of<F(Args...)>::type;
 
-  auto task = std::make_shared < std::packaged_task < return_type() > > (
+  auto task = std::make_shared<std::packaged_task<return_type()>> (
       std::bind(std::forward<F>(f), std::forward<Args>(args)...)
   );
 
-  std::future <return_type> res = task->get_future();
+  std::future<return_type> res = task->get_future();
   {
-    std::unique_lock <std::mutex> lock(queue_mutex_);
+    std::unique_lock<std::mutex> lock(queue_mutex_);
 
     // don't allow enqueueing after stopping the pool
     if (stop_)
@@ -125,12 +127,14 @@ auto ThreadPool::Enqueue(F &&f, Args &&... args)
 // the destructor joins all threads
 inline ThreadPool::~ThreadPool() {
   {
-    std::unique_lock <std::mutex> lock(queue_mutex_);
+    std::unique_lock<std::mutex> lock(queue_mutex_);
     stop_ = true;
   }
   condition_.notify_all();
   for (std::thread &worker: workers_)
     worker.join();
 }
+
+}  // namespace pierank
 
 #endif //PIERANK_THREAD_POOL_H_

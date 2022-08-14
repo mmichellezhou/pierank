@@ -8,11 +8,15 @@
 #include <cstdint>
 #include <string>
 
+#include <glog/logging.h>
+
+namespace pierank {
+
 template<typename T>
 class FlexIndex {
 public:
-  explicit FlexIndex(uint32_t bytes_per_elem = sizeof(T)) : bytes_per_elem_(
-      bytes_per_elem) {}
+  explicit FlexIndex(uint32_t bytes_per_elem = sizeof(T)) :
+      bytes_per_elem_(bytes_per_elem) {}
 
   void Append(T val) {
     std::size_t old_size = vals_.size();
@@ -30,10 +34,17 @@ public:
     return res;
   }
 
+  uint64_t Size() const {
+    DCHECK_EQ(vals_.size() % bytes_per_elem_, 0);
+    return vals_.size() / bytes_per_elem_;
+  }
+
 private:
   uint32_t bytes_per_elem_;
   std::string vals_;
 };
+
+}  // namespace pierank
 
 #endif //PIERANK_FLEX_INDEX_H_
 

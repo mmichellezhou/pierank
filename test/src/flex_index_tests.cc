@@ -1,10 +1,13 @@
 //
 // Created by Michelle Zhou on 2/24/22.
 //
-#include "flex_index.h"
+
 #include "gtest/gtest.h"
+#include "pierank/pierank.h"
 
 using namespace std;
+
+using namespace pierank;
 
 TEST(FlexIndex, AddElems) {
   FlexIndex<uint32_t> index(3);

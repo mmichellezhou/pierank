@@ -2,8 +2,8 @@
 // Created by Michelle Zhou on 1/17/22.
 //
 
-#ifndef PIERANK_PAGERANK_H_
-#define PIERANK_PAGERANK_H_
+#ifndef PIERANK_KERNELS_PAGERANK_H_
+#define PIERANK_KERNELS_PAGERANK_H_
 
 #include <algorithm>
 #include <cmath>
@@ -15,8 +15,10 @@
 
 #include <glog/logging.h>
 
-#include "sparse_matrix.h"
-#include "thread_pool.h"
+#include "pierank/sparse_matrix.h"
+#include "pierank/thread_pool.h"
+
+namespace pierank {
 
 template<typename T = double, typename PosType = uint32_t, typename IdxType = uint64_t>
 class PageRank : public SparseMatrix<PosType, IdxType> {
@@ -122,8 +124,10 @@ protected:
       T sum = 0.0;
 
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        DCHECK_GT(out_degree_[this->Pos(i)], 0);
+        DCHECK_LT(i, this->NumNonZeros());
+        DCHECK_LT(this->Pos(i), this->Rows());
         DCHECK_LT(this->Pos(i), scores_.size());
+        DCHECK_GT(out_degree_[this->Pos(i)], 0);
         sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
       }
 
@@ -163,4 +167,6 @@ private:
   T epsilon_;
 };
 
-#endif //PIERANK_PAGERANK_H_
+}  // namespace pierank
+
+#endif //PIERANK_KERNELS_PAGERANK_H_

@@ -11,6 +11,8 @@
 #include "flex_index.h"
 #include "io/matrix_market_io.h"
 
+namespace pierank {
+
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
@@ -30,17 +32,18 @@ public:
     rows_ = mat.Rows();
     cols_ = mat.Cols();
 
-    PosType col = std::numeric_limits<PosType>::max();
-
+    PosType prev_col = static_cast<PosType>(-1);
     while (mat.HasNext()) {
       auto pos = mat.Next();
       DCHECK_GT(pos.first, 0);
       DCHECK_GT(pos.second, 0);
       --pos.first;
       --pos.second;
-      if (col != pos.second) {
+      while (prev_col != pos.second) {
         index_.Append(nnz_);
-        col = pos.second;
+        ++prev_col;
+        DCHECK_LE(prev_col, pos.second);
+        DCHECK_EQ(index_[prev_col], nnz_);
       }
       pos_.Append(pos.first);
       nnz_++;
@@ -69,5 +72,7 @@ private:
   PosType rows_ = 0;
   PosType cols_ = 0;
 };
+
+}  // namespace pierank
 
 #endif //PIERANK_SPARSE_MATRIX_H_

@@ -2,9 +2,11 @@
 #include <utility>
 
 #include "gtest/gtest.h"
-#include "thread_pool.h"
+#include "pierank/pierank.h"
 
 using namespace std;
+
+using namespace pierank;
 
 TEST(ThreadPool, SimpleIntegerFunc) {
   ThreadPool pool(4);

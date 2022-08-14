@@ -1,10 +1,13 @@
 //
 // Created by Michelle Zhou on 2/19/22.
 //
-#include "matrix_market_io.h"
+
 #include "gtest/gtest.h"
+#include "pierank/pierank.h"
 
 using namespace std;
+
+using namespace pierank;
 
 TEST(MatrixMarketIo, ReadHeaderAsh219) {
   string file_path = "../../data/ash219.mtx";
