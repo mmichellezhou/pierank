@@ -15,6 +15,7 @@
 
 #include <glog/logging.h>
 
+#include "absl/status/status.h"
 #include "pierank/sparse_matrix.h"
 #include "pierank/thread_pool.h"
 
@@ -29,12 +30,18 @@ public:
 
   PageRank(const std::string &file_path, T damping_factor = 0.85,
            uint32_t max_iterations = 30, T epsilon = 1e-6) :
-           SparseMatrix<PosType, IdxType>(file_path),
-      damping_factor_(damping_factor),
-      num_pages_(std::max(this->Rows(), this->Cols())),
-      one_minus_d_over_n_((1 - damping_factor_) / num_pages_),
-      scores_(num_pages_, one_minus_d_over_n_), out_degree_(this->Rows()),
-      max_iterations_(max_iterations), epsilon_(epsilon) {
+      damping_factor_(damping_factor), max_iterations_(max_iterations),
+      epsilon_(epsilon) {
+    this->status_ = MatrixMarketIo::HasMtxFileExtension(file_path)
+                    ? this->ReadMatrixMarketFile(file_path)
+                    : this->ReadBinFile(file_path);
+    if (!this->status_.ok())
+      return;
+    num_pages_ = std::max(this->Rows(), this->Cols());
+    one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
+    scores_.resize(num_pages_, one_minus_d_over_n_);
+    out_degree_.resize(this->Rows());
+
     NumOutboundLinks();
   }
 

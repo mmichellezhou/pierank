@@ -10,8 +10,17 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
+
+namespace pierank {
+
 class MatrixMarketIo {
 public:
+  inline static bool HasMtxFileExtension(absl::string_view path) {
+    return absl::EndsWith(path, ".mtx");
+  }
+
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
     ok_ = static_cast<bool>(is_) && CheckBanner();
     if (ok_) {
@@ -81,5 +90,7 @@ private:
   bool ok_;
   uint64_t count_ = 0;
 };
+
+}  // namespace pierank
 
 #endif //PIERANK_IO_MATRIX_MARKET_IO_H_

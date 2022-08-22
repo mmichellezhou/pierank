@@ -6,9 +6,12 @@
 #define PIERANK_FLEX_INDEX_H_
 
 #include <cstdint>
+#include <iostream>
 #include <string>
 
 #include <glog/logging.h>
+
+#include "io/file_utils.h"
 
 namespace pierank {
 
@@ -37,6 +40,18 @@ public:
   uint64_t Size() const {
     DCHECK_EQ(vals_.size() % bytes_per_elem_, 0);
     return vals_.size() / bytes_per_elem_;
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
+    WriteUint32(os, index.bytes_per_elem_);
+    os << index.vals_;
+    return os;
+  }
+
+  friend std::istream &operator>>(std::istream &is, FlexIndex &index) {
+    index.bytes_per_elem_ = ReadUint32(is);
+    is >> index.vals_;
+    return is;
   }
 
 private:
