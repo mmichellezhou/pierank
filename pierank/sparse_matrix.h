@@ -18,9 +18,26 @@
 
 namespace pierank {
 
+/* Example SparseMatrix:
+   *
+   *     0 1 2 3 4
+   *     - - - - -
+   * 0 | 0 1 1 0 0 <- 0 is linked to 1 and 2
+   * 1 | 0 0 0 1 0
+   * 2 | 1 1 0 1 1
+   * 3 | 0 0 1 0 0
+   * 4 | 1 0 0 0 0
+   *     ^
+   *     2 and 4 are linked to 0
+   *
+   * pos = [2, 4, 0, 2, 0, 3, 1, 2, 2]
+   * idx = [0, 2, 4, 6, 8, 9]
+   */
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
+  static constexpr absl::string_view kPrmFileMagicNumbers = "#PRM";
+
   using PosRange = std::pair<PosType, PosType>;
 
   using PosRanges = std::vector <std::pair<PosType, PosType>>;
@@ -29,23 +46,14 @@ public:
 
   using FlexPosType = FlexIndex<PosType>;
 
-  inline static bool HasBinFileExtension(absl::string_view path) {
-    return absl::EndsWith(path, ".bin");
-  }
-
   SparseMatrix(const SparseMatrix &) = delete;
 
   SparseMatrix &operator=(const SparseMatrix &) = delete;
 
   SparseMatrix() = default;
 
-  SparseMatrix(const std::string &bin_file_path) {
-    if (!HasBinFileExtension(bin_file_path)) {
-      status_ = absl::InternalError(
-          absl::StrCat("Bad file extension: ", bin_file_path));
-      return;
-    }
-    status_ = this->ReadBinFile(bin_file_path);
+  SparseMatrix(const std::string &prm_file_path) {
+    status_ = this->ReadPrmFile(prm_file_path);
   }
 
   const FlexIdxType &Index() const { return index_; }
@@ -61,6 +69,8 @@ public:
   PosType Rows() const { return rows_; }
 
   PosType Cols() const { return cols_; }
+
+  bool Ok() const { return status_.ok(); }
 
   friend std::ostream &
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
@@ -81,10 +91,11 @@ public:
     return is;
   }
 
-  absl::Status WriteBinFile(const std::string &path) const {
+  absl::Status WritePrmFile(const std::string &path) const {
     std::ofstream file(path);
     if (!file.is_open() || !file.good())
       return absl::InternalError(absl::StrCat("Error opening file: ", path));
+    file << kPrmFileMagicNumbers;
     file << *this;
     file.close();
     if (file.fail())
@@ -92,10 +103,13 @@ public:
     return absl::OkStatus();
   }
 
-  absl::Status ReadBinFile(const std::string &path) {
+  absl::Status ReadPrmFile(const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open() || !file.good())
       return absl::InternalError(absl::StrCat("Error opening file: ", path));
+    if (!EatString(file, kPrmFileMagicNumbers))
+      return absl::InternalError(absl::StrCat("Bad file format: ", path));
+
     file >> *this;
     file.close();
     if (file.fail())
@@ -136,6 +150,20 @@ public:
     index_.Append(nnz_);
     return absl::OkStatus();
   }
+
+  std::string DebugString(uint32_t indent = 0) const {
+    std::string res =
+        absl::StrFormat("SparseMatrix@%x\n", reinterpret_cast<uint64_t>(this));
+    std::string tab(indent, ' ');
+    absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
+    absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
+    absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
+    indent += 2;
+    absl::StrAppend(&res, tab, "index: ", index_.DebugString(indent));
+    absl::StrAppend(&res, tab, "pos: ", pos_.DebugString(indent));
+    return res;
+  }
+
 
 protected:
   absl::Status status_;

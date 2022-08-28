@@ -34,7 +34,7 @@ public:
       epsilon_(epsilon) {
     this->status_ = MatrixMarketIo::HasMtxFileExtension(file_path)
                     ? this->ReadMatrixMarketFile(file_path)
-                    : this->ReadBinFile(file_path);
+                    : this->ReadPrmFile(file_path);
     if (!this->status_.ok())
       return;
     num_pages_ = std::max(this->Rows(), this->Cols());
@@ -45,30 +45,13 @@ public:
     NumOutboundLinks();
   }
 
-  /* Example SparseMatrix:
-   *
-   *     0 1 2 3 4
-   *     - - - - -
-   * 0 | 0 1 1 0 0 (0 is pointing to 1 and 2)
-   * 1 | 0 0 0 1 0
-   * 2 | 1 1 0 1 1
-   * 3 | 0 0 1 0 0
-   * 4 | 1 0 0 0 0
-   *    (2 and 4 are pointing to 0)
-   *
-   * pos = [2, 4, 0, 2, 0, 3, 1, 2, 2]
-   * idx = [0, 2, 4, 6, 8, 9]
-   */
-  void NumOutboundLinks() {
-    for (PosType nz = 0; nz < this->NumNonZeros(); nz++) {
-      out_degree_[this->Pos(nz)]++;
-    }
-  }
-
-  // Returns <epsilon, num_iterations> pair
+  // Returns <epsilon, num_iterations> pair or <+infinity, 0> on error
   std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
+    if (!this->status_.ok())
+      return std::make_pair(std::numeric_limits<T>::max(), 0);
+
     const auto ranges = SplitCols(pool);
-    epsilons_.resize(ranges.size());
+    epsilons_.resize(ranges.size(), std::numeric_limits<T>::max());
 
     uint32_t iter;
     for (iter = 0; iter < max_iterations_; ++iter) {
@@ -89,8 +72,12 @@ public:
     return std::make_pair(MaxEpsilon(), std::min(iter + 1, max_iterations_));
   }
 
+  // Returns an emtpy vector on error.
   std::vector<std::pair<T, uint32_t>> TopK(uint32_t k = 100) {
-    auto score_and_page_vec = ScoreAndPageVector();
+    std::vector<std::pair<T, uint32_t>> score_and_page_vec;
+    if (!this->status_.ok()) return score_and_page_vec;
+
+    score_and_page_vec = std::move(ScoreAndPageVector());
     std::sort(score_and_page_vec.begin(), score_and_page_vec.end(),
         [](const std::pair<T, uint32_t> &a, const std::pair<T, uint32_t> &b){
       return a.first > b.first;
@@ -112,7 +99,15 @@ public:
   const std::vector<T> &Scores() const { return scores_; }
 
 protected:
+  void NumOutboundLinks() {
+    DCHECK(this->status_.ok());
+    for (PosType nz = 0; nz < this->NumNonZeros(); nz++) {
+      out_degree_[this->Pos(nz)]++;
+    }
+  }
+
   std::vector<std::pair<T, uint32_t>> ScoreAndPageVector() {
+    DCHECK(this->status_.ok());
     std::vector<std::pair<T, uint32_t>> res;
 
     for (int i = 0; i < scores_.size(); ++i) {
@@ -123,6 +118,7 @@ protected:
   }
 
   void DoRange(const PosRange &range, uint32_t range_id) {
+    DCHECK(this->status_.ok());
     const auto first = range.first;
     const auto last = range.second;
     DCHECK_LT(first, last);
@@ -147,10 +143,12 @@ protected:
   }
 
   T MaxEpsilon() const {
+    DCHECK(this->status_.ok());
     return *std::max_element(epsilons_.begin(), epsilons_.end());
   }
 
   PosRanges SplitCols(std::shared_ptr<ThreadPool> pool = nullptr) const {
+    DCHECK(this->status_.ok());
     DCHECK_GT(this->Cols(), 0);
     if (!pool)
       return {std::make_pair(0, this->Cols())};

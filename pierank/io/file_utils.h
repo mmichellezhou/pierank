@@ -7,8 +7,11 @@
 
 #include <iostream>
 #include <limits>
+#include <memory>
 
 #include <glog/logging.h>
+
+#include "absl/strings/string_view.h"
 
 namespace pierank {
 
@@ -36,6 +39,16 @@ template<typename T>
 inline void WriteInteger(std::ostream &os, T val) {
   static_assert(std::is_integral_v<T>);
   os.write(reinterpret_cast<char *>(&val), sizeof(val));
+}
+
+template<typename T>
+inline void WriteInteger(std::ostream &os, T val, uint32_t encode_size) {
+  static_assert(std::is_integral_v<T>);
+  DCHECK_LE(encode_size, sizeof(T));
+  DCHECK(encode_size == sizeof(T)
+         || static_cast<uint64_t>(val) < (1ULL << (encode_size * 8)));
+  // Assumes little-endian machine!
+  os.write(reinterpret_cast<char *>(&val), encode_size);
 }
 
 inline void WriteUint32(std::ostream &os, uint32_t val) {
@@ -81,6 +94,13 @@ inline uint32_t ReadUint32(std::istream &is) {
 
 inline uint64_t ReadUint64(std::istream &is) {
   return ReadInteger<uint64_t>(is);
+}
+
+inline bool EatString(std::istream &is, absl::string_view str) {
+  auto size = str.size();
+  auto buf = std::make_unique<char[]>(size);
+  is.read(buf.get(), size);
+  return str == absl::string_view(buf.get(), size);
 }
 
 }  // namespace pierank
