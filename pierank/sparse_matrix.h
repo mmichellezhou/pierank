@@ -12,9 +12,9 @@
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 
-#include "flex_index.h"
-#include "io/file_utils.h"
-#include "io/matrix_market_io.h"
+#include "pierank/flex_index.h"
+#include "pierank/io/file_utils.h"
+#include "pierank/io/matrix_market_io.h"
 
 namespace pierank {
 
@@ -52,8 +52,10 @@ public:
 
   SparseMatrix() = default;
 
-  SparseMatrix(const std::string &prm_file_path) {
-    status_ = this->ReadPrmFile(prm_file_path);
+  SparseMatrix(const std::string &prm_file_path, bool mmap = false) {
+    status_ = mmap
+              ? this->MmapPrmFile(prm_file_path)
+              : this->ReadPrmFile(prm_file_path);
   }
 
   const FlexIdxType &Index() const { return index_; }
@@ -70,7 +72,9 @@ public:
 
   PosType Cols() const { return cols_; }
 
-  bool Ok() const { return status_.ok(); }
+  bool ok() const { return status_.ok(); }
+
+  absl::Status status() const { return status_; }
 
   friend std::ostream &
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
@@ -82,39 +86,55 @@ public:
     return os;
   }
 
+  // Reads {rows, cols, nnz} from `is`
+  void ReadPrmFileHeader(std::istream &is) {
+    if (EatString(is, kPrmFileMagicNumbers)) {
+      rows_ = ReadUint64AndConvert<PosType>(is);
+      cols_ = ReadUint64AndConvert<PosType>(is);
+      nnz_ = ReadUint64AndConvert<IdxType>(is);
+      if (!is)
+        status_.Update(absl::InternalError("Error read PRM file header"));
+    } else
+      status_.Update(absl::InternalError("Bad file format"));
+  }
+
   friend std::istream &operator>>(std::istream &is, SparseMatrix &matrix) {
-    matrix.rows_ = ReadUint64AndConvert<PosType>(is);
-    matrix.cols_ = ReadUint64AndConvert<PosType>(is);
-    matrix.nnz_ = ReadUint64AndConvert<IdxType>(is);
+    matrix.ReadPrmFileHeader(is);
     is >> matrix.index_;
     is >> matrix.pos_;
     return is;
   }
 
   absl::Status WritePrmFile(const std::string &path) const {
-    std::ofstream file(path);
-    if (!file.is_open() || !file.good())
-      return absl::InternalError(absl::StrCat("Error opening file: ", path));
-    file << kPrmFileMagicNumbers;
-    file << *this;
-    file.close();
-    if (file.fail())
-      return absl::InternalError(absl::StrCat("Error writing file: ", path));
+    auto file = OpenWriteFile(path);
+    if (!file.ok()) return file.status();
+    *file << kPrmFileMagicNumbers;
+    *file << *this;
+    file->close();
+    if (!(*file))
+      return absl::InternalError(absl::StrCat("Error write file: ", path));
     return absl::OkStatus();
   }
 
   absl::Status ReadPrmFile(const std::string &path) {
-    std::ifstream file(path);
-    if (!file.is_open() || !file.good())
-      return absl::InternalError(absl::StrCat("Error opening file: ", path));
-    if (!EatString(file, kPrmFileMagicNumbers))
-      return absl::InternalError(absl::StrCat("Bad file format: ", path));
+    auto file = OpenReadFile(path);
+    if (!file.ok()) return file.status();
 
-    file >> *this;
-    file.close();
-    if (file.fail())
-      return absl::InternalError(absl::StrCat("Error reading file: ", path));
+    *file >> *this;
+    if (!(*file))
+      return absl::InternalError(absl::StrCat("Error read file: ", path));
+
     return absl::OkStatus();
+  }
+
+  absl::Status MmapPrmFile(const std::string &path) {
+    auto file = OpenReadFile(path);
+    if (!file.ok()) return file.status();
+    ReadPrmFileHeader(*file);
+    uint64_t offset = kPrmFileMagicNumbers.size() + 3 * sizeof(uint64_t);
+    status_.Update(index_.Mmap(path, &offset));
+    status_.Update(pos_.Mmap(path, &offset));
+    return status_;
   }
 
   absl::Status ReadMatrixMarketFile(const std::string &path,

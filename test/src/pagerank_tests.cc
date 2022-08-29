@@ -14,13 +14,13 @@ class PageRankTestFixture : public ::testing::TestWithParam<std::string> {
 protected:
   void Run(const std::string &file_path) {
     PageRank pr0(file_path);
-    CHECK(pr0.Ok());
+    CHECK(pr0.ok());
     auto[epsilon, num_iterations] = pr0.Run();
     EXPECT_NEAR(epsilon, 7.39947e-05, 1e-06);
     EXPECT_EQ(num_iterations, 30);
 
-    PageRank pr1(file_path, /*damping_factor=*/0.85, /*max_iterations=*/50);
-    CHECK(pr1.Ok());
+    PageRank pr1(file_path, /*mmap=*/false, /*df=*/0.85, /*max_iters=*/50);
+    CHECK(pr1.ok());
     std::tie(epsilon, num_iterations) = pr1.Run();
     EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
     EXPECT_EQ(num_iterations, 48);
@@ -31,8 +31,9 @@ protected:
     //   std::cout << i << " " << scores[i] << "\n";
     // }
 
-    PageRank pr4(file_path, /*damping_factor=*/0.85, /*max_iterations=*/50);
-    CHECK(pr4.Ok());
+    bool mmap = !MatrixMarketIo::HasMtxFileExtension(file_path);
+    PageRank pr4(file_path, mmap, /*df=*/0.85, /*max_iters=*/50);
+    CHECK(pr4.ok());
     constexpr uint32_t kMaxThreads = 4;
     auto pool = std::make_shared<ThreadPool>(kMaxThreads);
     std::tie(epsilon, num_iterations) = pr4.Run(pool);

@@ -10,6 +10,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include <glog/logging.h>
 
@@ -17,7 +18,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 
-#include "io/file_utils.h"
+#include "pierank/io/file_utils.h"
 
 namespace pierank {
 
@@ -36,7 +37,9 @@ public:
   }
 
   T operator[](uint64_t idx) const {
-    auto *ptr = vals_.data() + idx * item_size_;
+    DCHECK(vals_.empty() || vals_mmap_.empty());
+    auto *ptr = vals_mmap_.empty() ? vals_.data() : vals_mmap_.data();
+    ptr += idx * item_size_;
 
     T res = 0;
     memcpy(&res, ptr, item_size_);
@@ -63,20 +66,45 @@ public:
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
     uint32_t min_item_size = index.MinItemSize();
-    WriteUint32(os, min_item_size);
+    if (!WriteUint32(os, min_item_size)) return os;
     uint64_t num_items = index.NumItems();
-    WriteUint64(os, min_item_size * num_items);
+    if (!WriteUint64(os, min_item_size * num_items)) return os;
     for (uint64_t i = 0; i < num_items; ++i)
-      WriteInteger(os, index[i], min_item_size);
+      if (!WriteInteger(os, index[i], min_item_size)) return os;
 
     return os;
   }
 
   friend std::istream &operator>>(std::istream &is, FlexIndex &index) {
     index.item_size_ = ReadUint32(is);
-    index.vals_.resize(ReadUint64(is));
-    is.read(index.vals_.data(), index.vals_.size());
+    if (!is) return is;
+
+    auto size = ReadUint64(is);
+    if (!is) return is;
+    index.vals_.resize(size);
+    is.read(index.vals_.data(), size);
+
     return is;
+  }
+
+  absl::Status Mmap(const std::string &path, uint64_t *offset) {
+    auto file = OpenReadFile(path);
+    if (!file.ok()) return file.status();
+    auto item_size = ReadUint32AtOffset(*file, *offset);
+    static_assert(std::is_same_v<decltype(item_size_), decltype(item_size)>);
+    item_size_ = item_size;
+    auto size = ReadUint64(*file);
+    if (!(*file))
+      return absl::InternalError(absl::StrCat("Error reading file: ", path));
+    file->close();
+
+    *offset += sizeof(item_size) + sizeof(size);
+    auto mmap = MmapReadOnlyFile(path, *offset, size);
+    *offset += size;
+    if (!mmap.ok()) return mmap.status();
+    vals_mmap_ = std::move(mmap).value();
+
+    return absl::OkStatus();
   }
 
   std::string DebugString(uint32_t indent = 0) const {
@@ -85,9 +113,8 @@ public:
     std::string tab(indent, ' ');
     absl::StrAppend(&res, tab, "item_size: ", item_size_, "\n");
     absl::StrAppend(&res, tab, "vals[", NumItems(), "]:");
-    for (uint64_t i = 0; i < NumItems(); ++i) {
+    for (uint64_t i = 0; i < NumItems(); ++i)
       absl::StrAppend(&res, " ", (*this)[i]);
-    }
     absl::StrAppend(&res, "\n");
     return res;
   }
@@ -96,6 +123,7 @@ private:
   uint32_t item_size_;
   T max_val_ = std::numeric_limits<T>::min();
   std::string vals_;
+  mio::mmap_source vals_mmap_;
 };
 
 }  // namespace pierank

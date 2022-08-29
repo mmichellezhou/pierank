@@ -28,13 +28,17 @@ public:
 
   using PosRanges = typename SparseMatrix<PosType, IdxType>::PosRanges;
 
-  PageRank(const std::string &file_path, T damping_factor = 0.85,
-           uint32_t max_iterations = 30, T epsilon = 1e-6) :
+  PageRank(const std::string &file_path, bool mmap_prm_file = false,
+           T damping_factor = 0.85, uint32_t max_iterations = 30,
+           T epsilon = 1e-6) :
       damping_factor_(damping_factor), max_iterations_(max_iterations),
       epsilon_(epsilon) {
-    this->status_ = MatrixMarketIo::HasMtxFileExtension(file_path)
-                    ? this->ReadMatrixMarketFile(file_path)
-                    : this->ReadPrmFile(file_path);
+    if (MatrixMarketIo::HasMtxFileExtension(file_path))
+      this->status_ = this->ReadMatrixMarketFile(file_path);
+    else if (mmap_prm_file)
+      this->status_ = this->MmapPrmFile(file_path);
+    else
+      this->status_ = this->ReadPrmFile(file_path);
     if (!this->status_.ok())
       return;
     num_pages_ = std::max(this->Rows(), this->Cols());
