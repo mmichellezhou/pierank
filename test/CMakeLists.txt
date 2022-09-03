@@ -15,6 +15,6 @@ set(SOURCE_FILES pierank_tests_main.cc
     src/thread_pool_tests.cc)
 
 add_executable(pierank_tests ${SOURCE_FILES})
-target_link_libraries(pierank_tests gtest glog::glog ${PIERANK_EXTERNAL_LIBRARIES})
+target_link_libraries(pierank_tests gtest ${glog_LDFLAGS} ${PIERANK_EXTERNAL_LIBRARIES})
 add_dependencies(pierank_tests ${PIERANK_EXTERNAL_DEPENDENCIES})
 install(TARGETS pierank_tests DESTINATION bin)

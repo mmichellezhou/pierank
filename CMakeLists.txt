@@ -6,10 +6,13 @@ project(pierank)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 find_package(Threads REQUIRED)
-find_package(glog 0.4.0 REQUIRED)
+
 find_package(gflags REQUIRED)
 
-include_directories(${glog_DIR} ${gflags_INCLUDE_DIR})
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(glog REQUIRED libglog)
+
+include_directories(${gflags_INCLUDE_DIR} ${glog_INCLUDE_DIRS})
 
 include(abseil_cpp)
 
