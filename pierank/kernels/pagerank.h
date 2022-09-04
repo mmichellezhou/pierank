@@ -36,9 +36,9 @@ public:
     if (MatrixMarketIo::HasMtxFileExtension(file_path))
       this->status_ = this->ReadMatrixMarketFile(file_path);
     else if (mmap_prm_file)
-      this->status_ = this->MmapPrmFile(file_path);
+      this->status_ = this->MmapPieRankMatrixFile(file_path);
     else
-      this->status_ = this->ReadPrmFile(file_path);
+      this->status_ = this->ReadPieRankMatrixFile(file_path);
     if (!this->status_.ok())
       return;
     num_pages_ = std::max(this->Rows(), this->Cols());

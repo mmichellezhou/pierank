@@ -11,12 +11,30 @@
 #include "absl/status/status.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 
 #include "pierank/flex_index.h"
 #include "pierank/io/file_utils.h"
 #include "pierank/io/matrix_market_io.h"
 
 namespace pierank {
+
+inline constexpr absl::string_view kPieRankMatrixFileMagicNumbers = "#PRM";
+
+inline constexpr absl::string_view kPieRankMatrixFileExtension = ".prm";
+
+inline constexpr absl::string_view kMatrixMarketFileExtension = ".mtx";
+
+// Returns an empty string on error.
+inline std::string MatrixMarketToPieRankMatrixPath(
+    absl::string_view mtx_path, absl::string_view prm_dir = "") {
+  if (!absl::ConsumeSuffix(&mtx_path, kMatrixMarketFileExtension))
+    return "";
+  if (prm_dir.empty())
+    return absl::StrCat(mtx_path, kPieRankMatrixFileExtension);
+  return absl::StrCat(prm_dir, kPathSeparator, FileNameInPath(mtx_path),
+                      kPieRankMatrixFileExtension);
+}
 
 /* Example SparseMatrix:
    *
@@ -36,8 +54,6 @@ namespace pierank {
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
-  static constexpr absl::string_view kPrmFileMagicNumbers = "#PRM";
-
   using PosRange = std::pair<PosType, PosType>;
 
   using PosRanges = std::vector <std::pair<PosType, PosType>>;
@@ -54,8 +70,8 @@ public:
 
   SparseMatrix(const std::string &prm_file_path, bool mmap = false) {
     status_ = mmap
-              ? this->MmapPrmFile(prm_file_path)
-              : this->ReadPrmFile(prm_file_path);
+              ? this->MmapPieRankMatrixFile(prm_file_path)
+              : this->ReadPieRankMatrixFile(prm_file_path);
   }
 
   const FlexIdxType &Index() const { return index_; }
@@ -87,8 +103,8 @@ public:
   }
 
   // Reads {rows, cols, nnz} from `is`
-  void ReadPrmFileHeader(std::istream &is) {
-    if (EatString(is, kPrmFileMagicNumbers)) {
+  void ReadPieRankMatrixFileHeader(std::istream &is) {
+    if (EatString(is, kPieRankMatrixFileMagicNumbers)) {
       rows_ = ReadUint64AndConvert<PosType>(is);
       cols_ = ReadUint64AndConvert<PosType>(is);
       nnz_ = ReadUint64AndConvert<IdxType>(is);
@@ -99,16 +115,16 @@ public:
   }
 
   friend std::istream &operator>>(std::istream &is, SparseMatrix &matrix) {
-    matrix.ReadPrmFileHeader(is);
+    matrix.ReadPieRankMatrixFileHeader(is);
     is >> matrix.index_;
     is >> matrix.pos_;
     return is;
   }
 
-  absl::Status WritePrmFile(const std::string &path) const {
+  absl::Status WritePieRankMatrixFile(const std::string &path) const {
     auto file = OpenWriteFile(path);
     if (!file.ok()) return file.status();
-    *file << kPrmFileMagicNumbers;
+    *file << kPieRankMatrixFileMagicNumbers;
     *file << *this;
     file->close();
     if (!(*file))
@@ -116,7 +132,7 @@ public:
     return absl::OkStatus();
   }
 
-  absl::Status ReadPrmFile(const std::string &path) {
+  absl::Status ReadPieRankMatrixFile(const std::string &path) {
     auto file = OpenReadFile(path);
     if (!file.ok()) return file.status();
 
@@ -127,11 +143,12 @@ public:
     return absl::OkStatus();
   }
 
-  absl::Status MmapPrmFile(const std::string &path) {
+  absl::Status MmapPieRankMatrixFile(const std::string &path) {
     auto file = OpenReadFile(path);
     if (!file.ok()) return file.status();
-    ReadPrmFileHeader(*file);
-    uint64_t offset = kPrmFileMagicNumbers.size() + 3 * sizeof(uint64_t);
+    ReadPieRankMatrixFileHeader(*file);
+    uint64_t offset =
+        kPieRankMatrixFileMagicNumbers.size() + 3 * sizeof(uint64_t);
     status_.Update(index_.Mmap(path, &offset));
     status_.Update(pos_.Mmap(path, &offset));
     return status_;

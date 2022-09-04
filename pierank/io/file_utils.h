@@ -19,6 +19,29 @@
 
 namespace pierank {
 
+#ifdef _WIN32
+inline constexpr absl::string_view kPathSeparator = "\\";
+#else
+inline constexpr absl::string_view kPathSeparator = "/";
+#endif
+
+// Get file name from path with or without extension.
+inline absl::string_view
+FileNameInPath(absl::string_view path, bool with_extension = true) {
+  auto sep = path.rfind(kPathSeparator);
+  if(sep == absl::string_view::npos)
+    return path;
+  auto dot = path.rfind('.');
+  if (with_extension || dot == absl::string_view::npos || dot <= sep + 1)
+    return path.substr(sep + 1);
+  return path.substr(sep + 1, dot - sep - 1);
+}
+
+inline absl::string_view DirectoryInPath(absl::string_view path) {
+  auto sep = path.rfind(kPathSeparator);
+  return sep != absl::string_view::npos ? path.substr(0, sep) : ".";
+}
+
 inline absl::StatusOr<std::ifstream> OpenReadFile(
     const std::string &path,
     std::ios_base::openmode mode = std::ifstream::binary) {

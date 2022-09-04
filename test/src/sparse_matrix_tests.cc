@@ -31,8 +31,8 @@ TEST(SparseMatrix, Read) {
   EXPECT_OK(mat.ReadMatrixMarketFile("../../data/ash219.mtx"));
   CheckAsh219(mat);
 
-  EXPECT_OK(mat.WritePrmFile("ash219.prm"));
-  EXPECT_OK(mat.ReadPrmFile("ash219.prm"));
+  EXPECT_OK(mat.WritePieRankMatrixFile("ash219.prm"));
+  EXPECT_OK(mat.ReadPieRankMatrixFile("ash219.prm"));
   SparseMatrix<uint32_t, uint64_t> mat2("ash219.prm");
   CheckAsh219(mat2);
 

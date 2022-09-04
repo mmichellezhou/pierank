@@ -2,6 +2,7 @@
 #define PIERANK_PIERANK_H
 
 #include "pierank/flex_index.h"
+#include "pierank/macros.h"
 #include "pierank/sparse_matrix.h"
 #include "pierank/thread_pool.h"
 
