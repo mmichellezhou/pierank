@@ -6,24 +6,25 @@ set(abseil_cpp_HASH SHA256=4208129b49006089ba1d6710845a45e31c59b0ab6bff9e5788a87
 set(abseil_cpp_BUILD ${CMAKE_BINARY_DIR}/abseil_cpp/src/abseil_cpp)
 
 set(abseil_cpp_STATIC_LIBRARIES
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_parse.a # before all others
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_marshalling.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_private_handle_accessor.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_program_name.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_reflection.a # before commandlineflag
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_usage.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_internal.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_usage_internal.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_config.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_commandlineflag_internal.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_commandlineflag.a
+    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags.a
+
+    # container should come after flags
     ${abseil_cpp_BUILD}/absl/container/libabsl_hashtablez_sampler.a
     ${abseil_cpp_BUILD}/absl/container/libabsl_raw_hash_set.a
 
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_commandlineflag_internal.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_commandlineflag.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_config.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_marshalling.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_parse.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_private_handle_accessor.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_program_name.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_reflection.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_usage.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_usage_internal.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags_internal.a
-    ${abseil_cpp_BUILD}/absl/flags/libabsl_flags.a
-
+    ${abseil_cpp_BUILD}/absl/hash/libabsl_hash.a # before city
     ${abseil_cpp_BUILD}/absl/hash/libabsl_city.a
-    ${abseil_cpp_BUILD}/absl/hash/libabsl_hash.a
     ${abseil_cpp_BUILD}/absl/hash/libabsl_low_level_hash.a
 
     ${abseil_cpp_BUILD}/absl/random/libabsl_random_distributions.a
