@@ -4,13 +4,14 @@
 
 #include "gtest/gtest.h"
 #include "pierank/pierank.h"
+#include "test_utils.h"
 
 using namespace std;
 
 using namespace pierank;
 
 TEST(MatrixMarketIo, ReadHeaderAsh219) {
-  string file_path = "../../data/ash219.mtx";
+  auto file_path = TestDataFilePath("ash219.mtx");
   MatrixMarketIo mm(file_path);
   EXPECT_TRUE(mm.Ok());
   EXPECT_EQ(mm.Rows(), 219);

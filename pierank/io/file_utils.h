@@ -112,10 +112,13 @@ WriteUint64(std::ostream &os, uint64_t val, uint32_t size = sizeof(uint64_t)) {
 }
 
 template<typename SrcType, typename DestType>
-inline DestType ReadAndConvertInteger(std::istream &is) {
+inline DestType ReadAndConvertInteger(std::istream &is,
+                                      uint64_t *offset = nullptr) {
   static_assert(std::is_integral_v<SrcType>);
   static_assert(std::is_integral_v<DestType>);
   SrcType src_val;
+  if (offset)
+    *offset += sizeof(src_val);
   if (!is.read(reinterpret_cast<char *>(&src_val), sizeof(src_val)))
     return std::numeric_limits<DestType>::max();
   DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
@@ -124,52 +127,61 @@ inline DestType ReadAndConvertInteger(std::istream &is) {
 }
 
 template<typename DestType>
-inline DestType ReadUint32AndConvert(std::istream &is) {
-  return ReadAndConvertInteger<uint32_t, DestType>(is);
+inline DestType ReadUint32AndConvert(std::istream &is,
+                                     uint64_t *offset = nullptr) {
+  return ReadAndConvertInteger<uint32_t, DestType>(is, offset);
 }
 
 template<typename DestType>
-inline DestType ReadUint64AndConvert(std::istream &is) {
-  return ReadAndConvertInteger<uint64_t, DestType>(is);
+inline DestType ReadUint64AndConvert(std::istream &is,
+                                     uint64_t *offset = nullptr) {
+  return ReadAndConvertInteger<uint64_t, DestType>(is, offset);
 }
 
 template<typename T>
-inline T ReadInteger(std::istream &is) {
+inline T ReadInteger(std::istream &is, uint64_t *offset = nullptr) {
   static_assert(std::is_integral_v<T>);
   T val;
+  if (offset)
+    *offset += sizeof(val);
   if (is.read(reinterpret_cast<char *>(&val), sizeof(val)))
     return val;
   return std::numeric_limits<T>::max();
 }
 
-inline uint32_t ReadUint32(std::istream &is) {
-  return ReadInteger<uint32_t>(is);
+inline uint32_t ReadUint32(std::istream &is, uint64_t *offset = nullptr) {
+  return ReadInteger<uint32_t>(is, offset);
 }
 
-inline uint64_t ReadUint64(std::istream &is) {
-  return ReadInteger<uint64_t>(is);
+inline uint64_t ReadUint64(std::istream &is, uint64_t *offset = nullptr) {
+  return ReadInteger<uint64_t>(is, offset);
 }
 
 template<typename T>
-inline T ReadIntegerAtOffset(std::istream &is, uint64_t offset) {
-  if (is.seekg(offset))
-    return ReadInteger<T>(is);
+inline T ReadIntegerAtOffset(std::istream &is, uint64_t *offset) {
+  DCHECK(offset);
+  if (is.seekg(*offset))
+    return ReadInteger<T>(is, offset);
   return std::numeric_limits<T>::max();
 }
 
-inline uint32_t ReadUint32AtOffset(std::istream &is, uint64_t offset) {
+inline uint32_t ReadUint32AtOffset(std::istream &is, uint64_t *offset) {
   return ReadIntegerAtOffset<uint32_t>(is, offset);
 }
 
-inline uint64_t ReadUint64AtOffset(std::istream &is, uint64_t offset) {
+inline uint64_t ReadUint64AtOffset(std::istream &is, uint64_t *offset) {
   return ReadIntegerAtOffset<uint64_t>(is, offset);
 }
 
-inline bool EatString(std::istream &is, absl::string_view str) {
+inline bool EatString(std::istream &is, absl::string_view str,
+                      uint64_t *offset = nullptr) {
   auto size = str.size();
   auto buf = std::make_unique<char[]>(size);
-  if (is.read(buf.get(), size))
+  if (is.read(buf.get(), size)) {
+    if (offset)
+      *offset += size;
     return str == absl::string_view(buf.get(), size);
+  }
   return false;
 }
 

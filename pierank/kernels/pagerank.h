@@ -41,6 +41,7 @@ public:
       this->status_ = this->ReadPieRankMatrixFile(file_path);
     if (!this->status_.ok())
       return;
+    CHECK_EQ(this->IndexDim(), 1);
     num_pages_ = std::max(this->Rows(), this->Cols());
     one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
     scores_.resize(num_pages_, one_minus_d_over_n_);
@@ -54,7 +55,7 @@ public:
     if (!this->status_.ok())
       return std::make_pair(std::numeric_limits<T>::max(), 0);
 
-    const auto ranges = SplitCols(pool);
+    const auto ranges = this->SplitIndexDim(pool ? pool->Size() : 1);
     epsilons_.resize(ranges.size(), std::numeric_limits<T>::max());
 
     uint32_t iter;
@@ -123,15 +124,17 @@ protected:
 
   void DoRange(const PosRange &range, uint32_t range_id) {
     DCHECK(this->status_.ok());
-    const auto first = range.first;
-    const auto last = range.second;
+    auto first = range.first;
+    auto last = range.second;
     DCHECK_LT(first, last);
+    last = std::min(last, this->IndexPosEnd());
+
     T epsilon = 0.0;
     for (PosType p = first; p < last; ++p) {
       T sum = 0.0;
 
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        DCHECK_LT(i, this->NumNonZeros());
+        DCHECK_LT(i, this->NumNonZeros()) << p;
         DCHECK_LT(this->Pos(i), this->Rows());
         DCHECK_LT(this->Pos(i), scores_.size());
         DCHECK_GT(out_degree_[this->Pos(i)], 0);
@@ -149,20 +152,6 @@ protected:
   T MaxEpsilon() const {
     DCHECK(this->status_.ok());
     return *std::max_element(epsilons_.begin(), epsilons_.end());
-  }
-
-  PosRanges SplitCols(std::shared_ptr<ThreadPool> pool = nullptr) const {
-    DCHECK(this->status_.ok());
-    DCHECK_GT(this->Cols(), 0);
-    if (!pool)
-      return {std::make_pair(0, this->Cols())};
-    PosRanges res;
-    PosType range_size = (this->Cols() + pool->Size() - 1) / pool->Size();
-    for (PosType first = 0; first < this->Cols(); first += range_size) {
-      PosType last = std::min(first + range_size, this->Cols());
-      res.push_back(std::make_pair(first, last));
-    }
-    return res;
   }
 
 private:

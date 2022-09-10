@@ -5,10 +5,13 @@
 #include "gtest/gtest.h"
 #include "pierank/pierank.h"
 #include "status_matcher.h"
+#include "test_utils.h"
 
 using namespace std;
 
 using namespace pierank;
+
+static bool kGeneratePieRankMatrixFile = false;
 
 void CheckAsh219(const SparseMatrix<uint32_t, uint64_t> &mat) {
   EXPECT_EQ(mat.NumNonZeros(), 438);
@@ -28,15 +31,18 @@ void CheckAsh219(const SparseMatrix<uint32_t, uint64_t> &mat) {
 
 TEST(SparseMatrix, Read) {
   SparseMatrix<uint32_t, uint64_t> mat;
-  EXPECT_OK(mat.ReadMatrixMarketFile("../../data/ash219.mtx"));
+  auto mtx_path = TestDataFilePath("ash219.mtx");
+  EXPECT_OK(mat.ReadMatrixMarketFile(mtx_path));
   CheckAsh219(mat);
 
-  EXPECT_OK(mat.WritePieRankMatrixFile("ash219.prm"));
-  EXPECT_OK(mat.ReadPieRankMatrixFile("ash219.prm"));
-  SparseMatrix<uint32_t, uint64_t> mat2("ash219.prm");
+  auto prm_path = TestDataFilePath("ash219.prm");
+  if (kGeneratePieRankMatrixFile)
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  EXPECT_OK(mat.ReadPieRankMatrixFile(prm_path));
+  SparseMatrix<uint32_t, uint64_t> mat2(prm_path);
   CheckAsh219(mat2);
 
-  SparseMatrix<uint32_t, uint64_t> mat3("ash219.prm", /*mmap=*/true);
+  SparseMatrix<uint32_t, uint64_t> mat3(prm_path, /*mmap=*/true);
   CHECK(mat3.ok());
   CheckAsh219(mat3);
 }

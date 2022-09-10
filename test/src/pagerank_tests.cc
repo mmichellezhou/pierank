@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 
 #include "pierank/pierank.h"
+#include "test_utils.h"
 
 using namespace std;
 
@@ -58,4 +59,6 @@ TEST_P(PageRankTestFixture, RankAsh219) {
 }
 
 INSTANTIATE_TEST_SUITE_P(PageRankTests, PageRankTestFixture,
-    ::testing::Values("../../data/ash219.mtx", "../../data/ash219.prm"));
+    ::testing::Values(TestDataFilePath("ash219.mtx"),
+                      TestDataFilePath("ash219.prm"))
+);

@@ -56,7 +56,7 @@ class SparseMatrix {
 public:
   using PosRange = std::pair<PosType, PosType>;
 
-  using PosRanges = std::vector <std::pair<PosType, PosType>>;
+  using PosRanges = std::vector<std::pair<PosType, PosType>>;
 
   using FlexIdxType = FlexIndex<IdxType>;
 
@@ -76,6 +76,11 @@ public:
 
   const FlexIdxType &Index() const { return index_; }
 
+  // Returns the pos AFTER the max index pos.
+  const PosType IndexPosEnd() const {
+    return static_cast<PosType>(index_.NumItems() - 1);
+  }
+
   IdxType Index(PosType pos) const { return index_[pos]; }
 
   const FlexPosType &Pos() const { return pos_; }
@@ -88,30 +93,37 @@ public:
 
   PosType Cols() const { return cols_; }
 
+  uint32_t IndexDim() const { return index_dim_; }
+
   bool ok() const { return status_.ok(); }
 
   absl::Status status() const { return status_; }
 
   friend std::ostream &
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
+    os << kPieRankMatrixFileMagicNumbers;
     ConvertAndWriteUint64(os, matrix.rows_);
     ConvertAndWriteUint64(os, matrix.cols_);
     ConvertAndWriteUint64(os, matrix.nnz_);
+    WriteUint32(os, matrix.index_dim_);
     os << matrix.index_;
     os << matrix.pos_;
     return os;
   }
 
   // Reads {rows, cols, nnz} from `is`
-  void ReadPieRankMatrixFileHeader(std::istream &is) {
-    if (EatString(is, kPieRankMatrixFileMagicNumbers)) {
-      rows_ = ReadUint64AndConvert<PosType>(is);
-      cols_ = ReadUint64AndConvert<PosType>(is);
-      nnz_ = ReadUint64AndConvert<IdxType>(is);
+  uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
+    uint64_t offset = 0;
+    if (EatString(is, kPieRankMatrixFileMagicNumbers,&offset)) {
+      rows_ = ReadUint64AndConvert<PosType>(is, &offset);
+      cols_ = ReadUint64AndConvert<PosType>(is, &offset);
+      nnz_ = ReadUint64AndConvert<IdxType>(is, &offset);
+      index_dim_ = ReadUint32(is, &offset);
       if (!is)
         status_.Update(absl::InternalError("Error read PRM file header"));
     } else
       status_.Update(absl::InternalError("Bad file format"));
+    return offset;
   }
 
   friend std::istream &operator>>(std::istream &is, SparseMatrix &matrix) {
@@ -124,7 +136,6 @@ public:
   absl::Status WritePieRankMatrixFile(const std::string &path) const {
     auto file = OpenWriteFile(path);
     if (!file.ok()) return file.status();
-    *file << kPieRankMatrixFileMagicNumbers;
     *file << *this;
     file->close();
     if (!(*file))
@@ -146,9 +157,7 @@ public:
   absl::Status MmapPieRankMatrixFile(const std::string &path) {
     auto file = OpenReadFile(path);
     if (!file.ok()) return file.status();
-    ReadPieRankMatrixFileHeader(*file);
-    uint64_t offset =
-        kPieRankMatrixFileMagicNumbers.size() + 3 * sizeof(uint64_t);
+    uint64_t offset = ReadPieRankMatrixFileHeader(*file);
     status_.Update(index_.Mmap(path, &offset));
     status_.Update(pos_.Mmap(path, &offset));
     return status_;
@@ -167,7 +176,7 @@ public:
 
     rows_ = mat.Rows();
     cols_ = mat.Cols();
-
+    index_dim_ = 1;  // Matrix Market file is column-major
     PosType prev_col = static_cast<PosType>(-1);
     while (mat.HasNext()) {
       auto pos = mat.Next();
@@ -186,6 +195,21 @@ public:
     }
     index_.Append(nnz_);
     return absl::OkStatus();
+  }
+
+  PosRanges SplitIndexDim(uint32_t num_pieces) const {
+    DCHECK(this->status_.ok());
+    PosType num_index_pos = index_dim_ ? this->Cols() : this->Rows();
+    DCHECK_GT(num_index_pos, 0);
+    if (num_pieces == 1)
+      return {std::make_pair(0, num_index_pos)};
+    PosRanges res;
+    PosType range_size = (num_index_pos + num_pieces - 1) / num_pieces;
+    for (PosType first = 0; first < num_index_pos; first += range_size) {
+      PosType last = std::min(first + range_size, num_index_pos);
+      res.push_back(std::make_pair(first, last));
+    }
+    return res;
   }
 
   std::string DebugString(uint32_t indent = 0) const {
@@ -209,6 +233,7 @@ private:
   PosType rows_ = 0;
   PosType cols_ = 0;
   IdxType nnz_ = 0;
+  uint32_t index_dim_ = 0;
   FlexIdxType index_;
   FlexPosType pos_;
 };
