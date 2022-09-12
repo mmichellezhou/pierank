@@ -36,7 +36,11 @@ public:
     else return 8;
   }
 
-  explicit FlexIndex(uint32_t item_size = sizeof(T)) : item_size_(item_size) {}
+  explicit FlexIndex(uint32_t item_size = sizeof(T)) : item_size_(item_size) {
+    CHECK_GT(item_size_, 0);
+    CHECK_LE(item_size_, sizeof(T));
+    CHECK_LE(item_size_, 8);
+  }
 
   void Append(T val) {
     std::size_t old_size = vals_.size();
@@ -53,7 +57,29 @@ public:
     ptr += idx * item_size_;
 
     T res = 0;
-    memcpy(&res, ptr, item_size_);
+    if (item_size_ == 1)
+      memcpy(&res, ptr, 1);
+    else if constexpr (sizeof(T) >= 2) {
+      if (item_size_ == 2)
+        memcpy(&res, ptr, 2);
+      else if constexpr (sizeof(T) >= 4) {
+        if (item_size_ == 3)
+          memcpy(&res, ptr, 3);
+        else if (item_size_ == 4)
+          memcpy(&res, ptr, 4);
+        else if constexpr (sizeof(T) == 8) {
+          if (item_size_ == 5)
+            memcpy(&res, ptr, 5);
+          else if (item_size_ == 6)
+            memcpy(&res, ptr, 6);
+          if (item_size_ == 7)
+            memcpy(&res, ptr, 7);
+          else
+            memcpy(&res, ptr, 8);
+        }
+      }
+    }
+
     if (shift_by_min_val_)
       res += min_val_;
     DCHECK_LE(res, max_val_);
