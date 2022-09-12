@@ -72,7 +72,7 @@ public:
             memcpy(&res, ptr, 5);
           else if (item_size_ == 6)
             memcpy(&res, ptr, 6);
-          if (item_size_ == 7)
+          else if (item_size_ == 7)
             memcpy(&res, ptr, 7);
           else
             memcpy(&res, ptr, 8);
