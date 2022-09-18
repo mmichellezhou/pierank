@@ -163,6 +163,11 @@ public:
     return status_;
   }
 
+  void UnMmap() {
+    index_.UnMmap();
+    pos_.UnMmap();
+  }
+
   absl::Status ReadMatrixMarketFile(const std::string &path,
                                     uint32_t bytes_per_pos = sizeof(PosType),
                                     uint32_t bytes_per_idx = sizeof(IdxType)) {

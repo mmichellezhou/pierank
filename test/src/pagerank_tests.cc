@@ -41,12 +41,12 @@ protected:
     EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
     EXPECT_EQ(num_iterations, 48);
 
-    auto score_and_page = pr4.TopK(10);
-    std::vector <uint32_t> top_pages = {0, 1, 7, 9, 2, 3, 6, 5, 8, 4};
-    EXPECT_EQ(score_and_page.size(), 10);
-    for (int i = 0; i < score_and_page.size(); ++i) {
-      auto pair = score_and_page[i];
-      EXPECT_EQ(pair.second, top_pages[i]);
+    auto page_scores = pr4.TopK(10);
+    std::vector<uint32_t> top_pages = {0, 1, 7, 9, 2, 3, 6, 5, 8, 4};
+    EXPECT_EQ(page_scores.size(), 10);
+    for (int i = 0; i < page_scores.size(); ++i) {
+      auto pair = page_scores[i];
+      EXPECT_EQ(pair.first, top_pages[i]);
       // std::cout << "Page: " << pair.second << " Score: " << pair.first
       //   << "\n";
     }

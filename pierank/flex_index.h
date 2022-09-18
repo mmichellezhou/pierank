@@ -168,6 +168,8 @@ public:
     return absl::OkStatus();
   }
 
+  void UnMmap() { vals_mmap_.unmap(); }
+
   std::string DebugString(uint32_t indent = 0) const {
     std::string res =
         absl::StrFormat("FlexIndex@%x\n", reinterpret_cast<uint64_t>(this));

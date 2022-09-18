@@ -27,6 +27,10 @@ public:
   using PosRange = typename SparseMatrix<PosType, IdxType>::PosRange;
 
   using PosRanges = typename SparseMatrix<PosType, IdxType>::PosRanges;
+  
+  using PageScore = std::pair<PosType, T>;
+
+  using PageScores = std::vector<PageScore>;
 
   PageRank(const std::string &file_path, bool mmap_prm_file = false,
            T damping_factor = 0.85, uint32_t max_iterations = 30,
@@ -78,27 +82,32 @@ public:
   }
 
   // Returns an emtpy vector on error.
-  std::vector<std::pair<T, uint32_t>> TopK(uint32_t k = 100) {
-    std::vector<std::pair<T, uint32_t>> score_and_page_vec;
-    if (!this->status_.ok()) return score_and_page_vec;
+  PageScores TopK(PosType k = 100) {
+    PageScores page_scores;
+    if (!this->status_.ok()) return page_scores;
 
-    score_and_page_vec = std::move(ScoreAndPageVector());
-    std::sort(score_and_page_vec.begin(), score_and_page_vec.end(),
-        [](const std::pair<T, uint32_t> &a, const std::pair<T, uint32_t> &b){
-      return a.first > b.first;
+    InitPageScores(&page_scores, k);
+    std::sort(page_scores.begin(), page_scores.end(),
+        [](const PageScore &a, const PageScore &b){
+      return a.second > b.second;
     });
 
-    if (k > num_pages_)
-      k = num_pages_;
+    if (k < num_pages_) {
+      for (auto i = k; i < num_pages_; ++i) {
+        auto it = std::upper_bound(page_scores.begin(),
+                                   page_scores.end(),
+                                   scores_[i],
+                                   [](T score, const PageScore &p) {
+                                     return score > p.second;
+                                   });
+        if (it != page_scores.end()) {
+          page_scores.back() = std::make_pair(i, scores_[i]);
+          std::rotate(it, page_scores.end() - 1, page_scores.end());
+        }
+      }
+    }
 
-    score_and_page_vec.resize(k);
-
-    // for (int i = 0; i < k; ++i) {
-      // auto pair = score_and_page[num_pages_ - i - 1];
-      // std::cout << "Page: " << pair.second << " Score: " << pair.first << "\n";
-    // }
-
-    return score_and_page_vec;
+    return page_scores;
   }
 
   const std::vector<T> &Scores() const { return scores_; }
@@ -111,15 +120,19 @@ protected:
     }
   }
 
-  std::vector<std::pair<T, uint32_t>> ScoreAndPageVector() {
+  void InitPageScores(
+      PageScores *pairs,
+      PosType max_pairs = std::numeric_limits<PosType>::max()) {
     DCHECK(this->status_.ok());
-    std::vector<std::pair<T, uint32_t>> res;
+    DCHECK_EQ(scores_.size(), num_pages_);
+    DCHECK_LE(scores_.size(), std::numeric_limits<PosType>::max());
+    PosType size = (scores_.size() < max_pairs) ? scores_.size() : max_pairs;
 
-    for (int i = 0; i < scores_.size(); ++i) {
-      res.push_back(std::make_pair(scores_[i], i));
+    DCHECK(pairs->empty());
+    pairs->clear();
+    for (PosType i = 0; i < size; ++i) {
+      pairs->push_back(std::make_pair(i, scores_[i]));
     }
-
-    return res;
   }
 
   void DoRange(const PosRange &range, uint32_t range_id) {

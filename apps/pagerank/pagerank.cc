@@ -36,13 +36,13 @@ int main(int argc, char **argv) {
       std::make_shared<pierank::ThreadPool>(absl::GetFlag(FLAGS_max_threads));
   auto [epsilon, iterations] = pr.Run(pool);
   duration = absl::Now() - start_time;
-  std::cout << "pagerank_time=" << duration << std::endl;
-  std::cout << "epsilon=" << epsilon << "\n";
-  std::cout << "iterations=" << iterations << "\n";
-  auto score_and_page = pr.TopK(absl::GetFlag(FLAGS_print_top_k));
-  std::cout << "# Page,Score\n";
-  for (int i = 0; i < score_and_page.size(); ++i) {
-    const auto &pair = score_and_page[i];
-    std::cout << pair.second << "," << pair.first << "\n";
+  std::cout << "pagerank_time: " << duration << std::endl;
+  std::cout << "epsilon: " << epsilon << std::endl;
+  std::cout << "iterations: " << iterations << std::endl;
+  auto page_scores = pr.TopK(absl::GetFlag(FLAGS_print_top_k));
+  std::cout << "# Page,Score" << std::endl;
+  for (uint32_t i = 0; i < page_scores.size(); ++i) {
+    const auto &pair = page_scores[i];
+    std::cout << pair.first << "," << pair.second << std::endl;
   }
 }
