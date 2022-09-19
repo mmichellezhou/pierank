@@ -62,9 +62,7 @@ public:
 
   using FlexPosType = FlexIndex<PosType>;
 
-  SparseMatrix(const SparseMatrix &) = delete;
-
-  SparseMatrix &operator=(const SparseMatrix &) = delete;
+  using UniquePtr = std::unique_ptr<SparseMatrix<PosType, IdxType>>;
 
   SparseMatrix() = default;
 
@@ -73,6 +71,10 @@ public:
               ? this->MmapPieRankMatrixFile(prm_file_path)
               : this->ReadPieRankMatrixFile(prm_file_path);
   }
+
+  SparseMatrix(const SparseMatrix &) = delete;
+
+  SparseMatrix &operator=(const SparseMatrix &) = delete;
 
   const FlexIdxType &Index() const { return index_; }
 
@@ -217,6 +219,50 @@ public:
     return res;
   }
 
+  UniquePtr ChangeIndexDim() const {
+    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
+    res->rows_ = rows_;
+    res->cols_ = cols_;
+    res->nnz_ = nnz_;
+    res->index_dim_ = index_dim_ ? 0 : 1;
+
+    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
+    FlexPosType nbr(pos_.ItemSize(), new_index_dim_size);
+    auto index_pos_end = IndexPosEnd();
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
+        nbr.IncItem(pos_[i]);
+    }
+
+    auto [min_item_size, shift_by_min_val] = index_.MinEncode();
+    CHECK(!shift_by_min_val) << "Not yet supported";
+    FlexIdxType idx(min_item_size);
+    IdxType nnz = 0;
+    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
+      idx.Append(nnz);
+      nnz += nbr[p];
+    }
+    DCHECK_EQ(nnz, nnz_);
+    if (idx[idx.NumItems() - 1] != nnz)
+      idx.Append(nnz);
+
+    nbr.Reset();
+    std::tie(min_item_size, shift_by_min_val) = pos_.MinEncode();
+    CHECK(!shift_by_min_val) << "Not yet supported";
+    FlexPosType pos(min_item_size, nnz);
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
+        auto pos_i = pos_[i];
+        pos.SetItem(idx[pos_i] + nbr[pos_i], p);
+        nbr.IncItem(pos_i);
+      }
+    }
+
+    res->index_ = std::move(idx);
+    res->pos_ = std::move(pos);
+    return res;
+  }
+
   std::string DebugString(uint32_t indent = 0) const {
     std::string res =
         absl::StrFormat("SparseMatrix@%x\n", reinterpret_cast<uint64_t>(this));
@@ -224,6 +270,7 @@ public:
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
+    absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
     indent += 2;
     absl::StrAppend(&res, tab, "index: ", index_.DebugString(indent));
     absl::StrAppend(&res, tab, "pos: ", pos_.DebugString(indent));

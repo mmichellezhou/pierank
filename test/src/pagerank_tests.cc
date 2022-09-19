@@ -38,6 +38,7 @@ protected:
     constexpr uint32_t kMaxThreads = 4;
     auto pool = std::make_shared<ThreadPool>(kMaxThreads);
     std::tie(epsilon, num_iterations) = pr4.Run(pool);
+    if (mmap) pr4.UnMmap();
     EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
     EXPECT_EQ(num_iterations, 48);
 

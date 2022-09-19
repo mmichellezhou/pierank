@@ -13,8 +13,21 @@ using namespace pierank;
 
 static bool kGeneratePieRankMatrixFile = false;
 
-void CheckAsh219(const SparseMatrix<uint32_t, uint64_t> &mat) {
+void CheckAsh219Common(const SparseMatrix<uint32_t, uint64_t> &mat) {
+  EXPECT_EQ(mat.Rows(), 219);
+  EXPECT_EQ(mat.Cols(), 85);
   EXPECT_EQ(mat.NumNonZeros(), 438);
+  EXPECT_FALSE(mat.Index().ShiftByMinValue());
+  EXPECT_EQ(mat.Index().MinValue(), 0);
+  EXPECT_EQ(mat.Index().MaxValue(), 438);
+  EXPECT_FALSE(mat.Pos().ShiftByMinValue());
+  EXPECT_EQ(mat.Pos().MinValue(), 0);
+}
+
+void CheckAsh219ColIndex(const SparseMatrix<uint32_t, uint64_t> &mat) {
+  CheckAsh219Common(mat);
+  EXPECT_EQ(mat.IndexDim(), 1);
+  EXPECT_EQ(mat.Pos().MaxValue(), 218);
 
   auto& index = mat.Index();
   auto& pos = mat.Pos();
@@ -29,20 +42,55 @@ void CheckAsh219(const SparseMatrix<uint32_t, uint64_t> &mat) {
     EXPECT_EQ(pos[idx], row_ids[idx - index[84]]);
 }
 
-TEST(SparseMatrix, Read) {
-  SparseMatrix<uint32_t, uint64_t> mat;
-  auto mtx_path = TestDataFilePath("ash219.mtx");
-  EXPECT_OK(mat.ReadMatrixMarketFile(mtx_path));
-  CheckAsh219(mat);
+void CheckAsh219RowIndex(const SparseMatrix<uint32_t, uint64_t> &mat) {
+  CheckAsh219Common(mat);
+  EXPECT_EQ(mat.IndexDim(), 0);
+  EXPECT_EQ(mat.Pos().MaxValue(), 84);
 
-  auto prm_path = TestDataFilePath("ash219.prm");
-  if (kGeneratePieRankMatrixFile)
-    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
-  EXPECT_OK(mat.ReadPieRankMatrixFile(prm_path));
-  SparseMatrix<uint32_t, uint64_t> mat2(prm_path);
-  CheckAsh219(mat2);
+  auto& index = mat.Index();
+  auto& pos = mat.Pos();
 
-  SparseMatrix<uint32_t, uint64_t> mat3(prm_path, /*mmap=*/true);
-  CHECK(mat3.ok());
-  CheckAsh219(mat3);
+  // test the list of non-zero columns for 1st row
+  for (uint64_t idx = 0; idx < index[1]; ++idx)
+    EXPECT_EQ(pos[index[0] + idx], idx);
+
+  // test the list of non-zero columns for the last row (219th)
+  vector<uint32_t> col_ids = {83, 84};
+  for (uint64_t idx = index[218]; idx < index[219]; ++idx)
+    EXPECT_EQ(pos[idx], col_ids[idx - index[218]]);
 }
+
+class SparseMatrixTestFixture : public ::testing::TestWithParam<std::string> {
+protected:
+  void Run(const std::string &file_path) {
+    SparseMatrix<uint32_t, uint64_t> mat;
+    if (MatrixMarketIo::HasMtxFileExtension(file_path)) {
+      EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+      EXPECT_EQ(mat.Index().ItemSize(), 8);
+      EXPECT_EQ(mat.Pos().ItemSize(), 4);
+      if (kGeneratePieRankMatrixFile)
+        EXPECT_OK(mat.WritePieRankMatrixFile(file_path));
+    }
+    else {
+      EXPECT_OK(mat.ReadPieRankMatrixFile(file_path));
+      EXPECT_EQ(mat.Index().ItemSize(), 2);
+      EXPECT_EQ(mat.Pos().ItemSize(), 1);
+      SparseMatrix<uint32_t, uint64_t> mat_mmap(file_path, /*mmap=*/true);
+      EXPECT_TRUE(mat_mmap.ok());
+      CheckAsh219ColIndex(mat_mmap);
+    }
+    CheckAsh219ColIndex(mat);
+    auto mat_by_row = mat.ChangeIndexDim();
+    CheckAsh219RowIndex(*mat_by_row.get());
+  }
+};
+
+TEST_P(SparseMatrixTestFixture, RankAsh219) {
+  std::string file_path = GetParam();
+  Run(file_path);
+}
+
+INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, SparseMatrixTestFixture,
+    ::testing::Values(TestDataFilePath("ash219.mtx"),
+                      TestDataFilePath("ash219.prm"))
+);

@@ -22,6 +22,29 @@
 
 namespace pierank {
 
+#define PRK_MEMCPY(dest, src, size)                                   \
+  do {                                                                \
+    if (size == 1)                                                    \
+      memcpy(dest, src, 1);                                           \
+    else if (size == 2)                                               \
+      memcpy(dest, src, 2);                                           \
+    else if (size == 3)                                               \
+      memcpy(dest, src, 3);                                           \
+    else if (size == 4)                                               \
+      memcpy(dest, src, 4);                                           \
+    else if (size == 5)                                               \
+      memcpy(dest, src, 5);                                           \
+    else if (size == 6)                                               \
+      memcpy(dest, src, 6);                                           \
+    else if (size == 7)                                               \
+      memcpy(dest, src, 7);                                           \
+    else {                                                            \
+      DCHECK_EQ(size, 8);                                             \
+      memcpy(dest, src, 8);                                           \
+    }                                                                 \
+  } while(0)
+
+
 template<typename T>
 class FlexIndex {
 public:
@@ -42,11 +65,19 @@ public:
     CHECK_LE(item_size_, 8);
   }
 
+  FlexIndex(uint32_t item_size, uint64_t num_items) :
+      item_size_(item_size), vals_(item_size * num_items, '\0') {}
+
+  FlexIndex(const FlexIndex &) = delete;
+
+  FlexIndex &operator=(const FlexIndex &) = delete;
+
+  FlexIndex &operator=(FlexIndex &&) = default;
+
   void Append(T val) {
     std::size_t old_size = vals_.size();
-    for (int i = 0; i < item_size_; i++)
-      vals_.push_back(0);
-    memcpy(&vals_[old_size], reinterpret_cast<void *>(&val), item_size_);
+    vals_.resize(old_size + item_size_);
+    PRK_MEMCPY(&vals_[old_size], &val, item_size_);
     min_val_ = std::min(min_val_, val);
     max_val_ = std::max(max_val_, val);
   }
@@ -57,34 +88,35 @@ public:
     ptr += idx * item_size_;
 
     T res = 0;
-    if (item_size_ == 1)
-      memcpy(&res, ptr, 1);
-    else if constexpr (sizeof(T) >= 2) {
-      if (item_size_ == 2)
-        memcpy(&res, ptr, 2);
-      else if constexpr (sizeof(T) >= 4) {
-        if (item_size_ == 3)
-          memcpy(&res, ptr, 3);
-        else if (item_size_ == 4)
-          memcpy(&res, ptr, 4);
-        else if constexpr (sizeof(T) == 8) {
-          if (item_size_ == 5)
-            memcpy(&res, ptr, 5);
-          else if (item_size_ == 6)
-            memcpy(&res, ptr, 6);
-          else if (item_size_ == 7)
-            memcpy(&res, ptr, 7);
-          else
-            memcpy(&res, ptr, 8);
-        }
-      }
-    }
+    PRK_MEMCPY(&res, ptr, item_size_);
 
     if (shift_by_min_val_)
       res += min_val_;
-    DCHECK_LE(res, max_val_);
+    DCHECK_LE(res, max_val_) << "idx: " << idx;
     return res;
   }
+
+  void SetItem(uint64_t idx, T value) {
+    DCHECK_LE((idx + 1) * item_size_, vals_.size());
+    auto *ptr = vals_.data() + idx * item_size_;
+    PRK_MEMCPY(ptr, &value, item_size_);
+    min_val_ = std::min(min_val_, value);
+    max_val_ = std::max(max_val_, value);
+  }
+
+  T IncItem(uint64_t idx, T delta = 1) {
+    DCHECK_GT(delta, 0);
+    DCHECK_LE((idx + 1) * item_size_, vals_.size());
+    T res = 0;
+    auto ptr = vals_.data() + idx * item_size_;
+    PRK_MEMCPY(&res, ptr, item_size_);
+    res += delta;
+    PRK_MEMCPY(ptr, &res, item_size_);
+    max_val_ = std::max(max_val_, res);
+    return res;
+  }
+
+  uint32_t ItemSize() const { return item_size_; }
 
   uint64_t NumItems() const {
     DCHECK_EQ(vals_.size() % item_size_, 0);
@@ -96,6 +128,8 @@ public:
   T MaxValue() const { return max_val_; }
 
   bool ShiftByMinValue() const { return shift_by_min_val_; }
+
+  void Reset() { std::memset(vals_.data(), 0, vals_.size()); }
 
   std::pair<uint32_t, bool> MinEncode() const {
     uint32_t encode_size_without_shift = MinEncodeSize(max_val_);
@@ -168,7 +202,11 @@ public:
     return absl::OkStatus();
   }
 
-  void UnMmap() { vals_mmap_.unmap(); }
+  void UnMmap() {
+    DCHECK(vals_.empty());
+    if (vals_mmap_.size())
+      vals_mmap_.unmap();
+  }
 
   std::string DebugString(uint32_t indent = 0) const {
     std::string res =
