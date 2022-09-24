@@ -263,17 +263,17 @@ public:
     return res;
   }
 
-  std::string DebugString(uint32_t indent = 0) const {
-    std::string res =
-        absl::StrFormat("SparseMatrix@%x\n", reinterpret_cast<uint64_t>(this));
+  std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
+    std::string res;
     std::string tab(indent, ' ');
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
     absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
     indent += 2;
-    absl::StrAppend(&res, tab, "index: ", index_.DebugString(indent));
-    absl::StrAppend(&res, tab, "pos: ", pos_.DebugString(indent));
+    absl::StrAppend(&res, tab, "index:\n",
+                    index_.DebugString(max_items, indent));
+    absl::StrAppend(&res, tab, "pos:\n", pos_.DebugString(max_items, indent));
     return res;
   }
 

@@ -119,8 +119,13 @@ public:
   uint32_t ItemSize() const { return item_size_; }
 
   uint64_t NumItems() const {
-    DCHECK_EQ(vals_.size() % item_size_, 0);
-    return vals_.size() / item_size_;
+    if (vals_.size()) {
+      DCHECK(vals_mmap_.empty());
+      DCHECK_EQ(vals_.size() % item_size_, 0);
+      return vals_.size() / item_size_;
+    }
+    DCHECK_EQ(vals_mmap_.size() % item_size_, 0);
+    return vals_mmap_.size() / item_size_;
   }
 
   T MinValue() const { return min_val_; }
@@ -208,17 +213,19 @@ public:
       vals_mmap_.unmap();
   }
 
-  std::string DebugString(uint32_t indent = 0) const {
-    std::string res =
-        absl::StrFormat("FlexIndex@%x\n", reinterpret_cast<uint64_t>(this));
+  std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
+    std::string res;
     std::string tab(indent, ' ');
     absl::StrAppend(&res, tab, "item_size: ", item_size_, "\n");
     absl::StrAppend(&res, tab, "shift_by_min_val: ", shift_by_min_val_, "\n");
     absl::StrAppend(&res, tab, "min_val: ", min_val_, "\n");
     absl::StrAppend(&res, tab, "max_val: ", max_val_, "\n");
     absl::StrAppend(&res, tab, "vals[", NumItems(), "]:");
-    for (uint64_t i = 0; i < NumItems(); ++i)
+    max_items = std::min(max_items, NumItems());
+    for (uint64_t i = 0; i < max_items; ++i)
       absl::StrAppend(&res, " ", (*this)[i]);
+    if (max_items < NumItems())
+      absl::StrAppend(&res, " ...");
     absl::StrAppend(&res, "\n");
     return res;
   }
