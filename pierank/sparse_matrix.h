@@ -204,19 +204,54 @@ public:
     return absl::OkStatus();
   }
 
-  PosRanges SplitIndexDim(uint32_t num_pieces) const {
-    DCHECK(this->status_.ok());
-    PosType num_index_pos = index_dim_ ? this->Cols() : this->Rows();
-    DCHECK_GT(num_index_pos, 0);
+  static PosRanges SplitIndexDim(const FlexIdxType &index, IdxType nnz,
+                                 uint32_t num_pieces, bool balance_nnz = true) {
+    if (index.NumItems() == 0)
+      return {std::make_pair(0, 0)};
+    PosType num_index_pos = index.NumItems() - 1;
     if (num_pieces == 1)
       return {std::make_pair(0, num_index_pos)};
     PosRanges res;
-    PosType range_size = (num_index_pos + num_pieces - 1) / num_pieces;
-    for (PosType first = 0; first < num_index_pos; first += range_size) {
-      PosType last = std::min(first + range_size, num_index_pos);
-      res.push_back(std::make_pair(first, last));
+    if (balance_nnz) {
+      IdxType max_nnz_per_range = (nnz + num_pieces - 1) / num_pieces;
+      PosType avg_nnz_per_pos = (nnz + num_index_pos - 1) / num_index_pos;
+      PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
+      pos_step_size = std::min(pos_step_size, num_index_pos);
+      pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
+      PosType first = 0;
+      while (first < num_index_pos) {
+        PosType last = first + 1;
+        IdxType range_nnz = index[last] - index[first];
+        if (range_nnz < max_nnz_per_range) {
+          PosType step_size = pos_step_size;
+          while (step_size > 0 && last < num_index_pos) {
+            PosType new_last = std::min(last + step_size, num_index_pos);
+            IdxType step_nnz = index[new_last] - index[last];
+            if (range_nnz + step_nnz <= max_nnz_per_range) {
+              range_nnz += step_nnz;
+              last = new_last;
+              if (step_size * 2 <= pos_step_size)
+                step_size *= 2;
+            } else
+              step_size /= 2;
+          }
+        }
+        res.push_back(std::make_pair(first, last));
+        first = last;
+      }
+    } else {
+      PosType range_size = (num_index_pos + num_pieces - 1) / num_pieces;
+      for (PosType first = 0; first < num_index_pos; first += range_size) {
+        PosType last = std::min(first + range_size, num_index_pos);
+        res.push_back(std::make_pair(first, last));
+      }
     }
     return res;
+  }
+
+  PosRanges SplitIndexDim(uint32_t num_pieces, bool balance_nnz = true) const {
+    DCHECK(this->status_.ok());
+    return SplitIndexDim(index_, nnz_, num_pieces, balance_nnz);
   }
 
   UniquePtr ChangeIndexDim() const {
