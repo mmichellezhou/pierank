@@ -35,7 +35,9 @@ int main(int argc, char **argv) {
   const auto *mat_out = &mat;
   if (absl::GetFlag(FLAGS_output_row_major)) {
     start_time = absl::Now();
-    mat_out = mat.ChangeIndexDim().get();
+    auto mat_out_or = mat.ChangeIndexDim();
+    CHECK(mat_out_or.ok());
+    mat_out = mat_out_or->release();
     duration = absl::Now() - start_time;
     std::cout << "mtx_row_index_time: " << duration << std::endl;
   }

@@ -59,6 +59,16 @@ public:
     else return 8;
   }
 
+  static std::pair<uint32_t, bool> MinEncode(T max_val, T min_val = 0) {
+    uint32_t encode_size_without_shift = MinEncodeSize(max_val);
+    uint32_t encode_size_with_shift = MinEncodeSize(max_val - min_val);
+    DCHECK_LE(encode_size_with_shift, encode_size_without_shift);
+    if (encode_size_with_shift < encode_size_without_shift) {
+      return std::make_pair(encode_size_with_shift, true);
+    }
+    return std::make_pair(encode_size_without_shift, false);
+  }
+
   explicit FlexIndex(uint32_t item_size = sizeof(T)) : item_size_(item_size) {
     CHECK_GT(item_size_, 0);
     CHECK_LE(item_size_, sizeof(T));
@@ -132,72 +142,97 @@ public:
 
   T MaxValue() const { return max_val_; }
 
+  void SetMinMaxValues(T min_val, T max_val) {
+    min_val_ = min_val;
+    max_val_ = max_val;
+  }
+
   bool ShiftByMinValue() const { return shift_by_min_val_; }
 
   void Reset() { std::memset(vals_.data(), 0, vals_.size()); }
 
   std::pair<uint32_t, bool> MinEncode() const {
-    uint32_t encode_size_without_shift = MinEncodeSize(max_val_);
-    uint32_t encode_size_with_shift = MinEncodeSize(max_val_ - min_val_);
-    DCHECK_LE(encode_size_with_shift, encode_size_without_shift);
-    if (encode_size_with_shift < encode_size_without_shift) {
-      return std::make_pair(encode_size_with_shift, true);
+    return MinEncode(max_val_, min_val_);
+  }
+
+  template<typename OutputStreamType>
+  bool WriteValues(OutputStreamType *os, uint32_t item_size,
+                   bool shift_by_min_value) const {
+    uint64_t num_items = NumItems();
+    if (!WriteUint64(os, item_size * num_items)) return false;
+    int shift;
+    if (ShiftByMinValue() == shift_by_min_value)
+      shift = 0;
+    else if (shift_by_min_value)
+      shift = -1;
+    else
+      shift = 1;
+    for (uint64_t i = 0; i < num_items; ++i) {
+      T val = (*this)[i];
+      if (shift < 0) {
+        DCHECK_GE(val, min_val_);
+        val -= min_val_;
+      } else if (shift > 0) {
+        DCHECK_LE(val, std::numeric_limits<T>::max() - min_val_);
+        val += min_val_;
+      }
+      if (!WriteInteger(os, val, item_size)) return false;
     }
-    return std::make_pair(encode_size_without_shift, false);
+    return true;
+  }
+
+  template<typename InputStreamType>
+  bool ReadValues(InputStreamType *is, uint64_t *offset = nullptr) {
+    auto size = ReadUint64(is);
+    if (!*is) return false;
+    uint64_t new_size = offset ? size + *offset : size;
+    if (vals_.size() < new_size)
+      vals_.resize(new_size);
+    char *str = offset ? vals_.data() + *offset : vals_.data();
+    if (offset) *offset += size;
+    return ReadData<InputStreamType>(is, str, size);
   }
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
     auto [min_item_size, shift_by_min_val] = index.MinEncode();
-    if (!WriteUint32(os, min_item_size)) return os;
-    if (!ConvertAndWriteUint32(os, shift_by_min_val)) return os;
+    if (!WriteUint32(&os, min_item_size)) return os;
+    if (!ConvertAndWriteUint32(&os, shift_by_min_val)) return os;
     CHECK(index.ShiftByMinValue() == shift_by_min_val || shift_by_min_val);
-    if (!ConvertAndWriteUint64(os, index.MinValue())) return os;
-    if (!ConvertAndWriteUint64(os, index.MaxValue())) return os;
-    uint64_t num_items = index.NumItems();
-    if (!WriteUint64(os, min_item_size * num_items)) return os;
-    for (uint64_t i = 0; i < num_items; ++i) {
-      T val = index[i];
-      if (index.ShiftByMinValue() != shift_by_min_val) {
-        DCHECK_GE(val, index.MinValue());
-        val -= index.MinValue();
-      }
-      if (!WriteInteger(os, val, min_item_size)) return os;
-    }
+    if (!ConvertAndWriteUint64(&os, index.MinValue())) return os;
+    if (!ConvertAndWriteUint64(&os, index.MaxValue())) return os;
+    if (!index.WriteValues(&os, min_item_size, shift_by_min_val)) return os;
 
     return os;
   }
 
   friend std::istream &operator>>(std::istream &is, FlexIndex &index) {
-    index.item_size_ = ReadUint32(is);
+    index.item_size_ = ReadUint32(&is);
     if (!is) return is;
-    index.shift_by_min_val_ = ReadUint32AndConvert<bool>(is);
+    index.shift_by_min_val_ = ReadUint32AndConvert<bool>(&is);
     if (!is) return is;
-    index.min_val_ = ReadUint64AndConvert<T>(is);
+    index.min_val_ = ReadUint64AndConvert<T>(&is);
     if (!is) return is;
-    index.max_val_ = ReadUint64AndConvert<T>(is);
+    index.max_val_ = ReadUint64AndConvert<T>(&is);
     if (!is) return is;
-
-    auto size = ReadUint64(is);
-    if (!is) return is;
-    index.vals_.resize(size);
-    is.read(index.vals_.data(), size);
+    index.ReadValues(&is);
 
     return is;
   }
 
   absl::Status Mmap(const std::string &path, uint64_t *offset) {
-    auto file = OpenReadFile(path);
-    if (!file.ok()) return file.status();
-    auto item_size = ReadUint32AtOffset(*file, offset);
+    auto file_or = OpenReadFile(path);
+    if (!file_or.ok()) return file_or.status();
+    std::ifstream file = std::move(*file_or);
+    auto item_size = ReadUint32AtOffset(&file, offset);
     static_assert(std::is_same_v<decltype(item_size_), decltype(item_size)>);
     item_size_ = item_size;
-    shift_by_min_val_ = ReadUint32AndConvert<bool>(*file, offset);
-    min_val_ = ReadUint64AndConvert<T>(*file, offset);
-    max_val_ = ReadUint64AndConvert<T>(*file, offset);
-    auto size = ReadUint64(*file, offset);
-    if (!(*file))
+    shift_by_min_val_ = ReadUint32AndConvert<bool>(&file, offset);
+    min_val_ = ReadUint64AndConvert<T>(&file, offset);
+    max_val_ = ReadUint64AndConvert<T>(&file, offset);
+    auto size = ReadUint64(&file, offset);
+    if (!file)
       return absl::InternalError(absl::StrCat("Error reading file: ", path));
-    file->close();
+    file.close();
 
     auto mmap = MmapReadOnlyFile(path, *offset, size);
     *offset += size;

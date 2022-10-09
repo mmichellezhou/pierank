@@ -59,7 +59,7 @@ public:
     if (!this->status_.ok())
       return std::make_pair(std::numeric_limits<T>::max(), 0);
 
-    const auto ranges = this->SplitIndexDim(pool ? pool->Size() : 1);
+    const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
     epsilons_.resize(ranges.size(), std::numeric_limits<T>::max());
 
     uint32_t iter;
@@ -137,8 +137,8 @@ protected:
 
   void DoRange(const PosRange &range, uint32_t range_id) {
     DCHECK(this->status_.ok());
-    auto first = range.first;
-    auto last = range.second;
+    auto first = std::get<0>(range);
+    auto last = std::get<1>(range);
     DCHECK_LT(first, last);
     last = std::min(last, this->IndexPosEnd());
 

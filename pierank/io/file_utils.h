@@ -9,6 +9,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <stdio.h>
+#include <string.h>
 
 #include <glog/logging.h>
 
@@ -29,7 +31,7 @@ inline constexpr absl::string_view kPathSeparator = "/";
 inline absl::string_view
 FileNameInPath(absl::string_view path, bool with_extension = true) {
   auto sep = path.rfind(kPathSeparator);
-  if(sep == absl::string_view::npos)
+  if (sep == absl::string_view::npos)
     return path;
   auto dot = path.rfind('.');
   if (with_extension || dot == absl::string_view::npos || dot <= sep + 1)
@@ -60,6 +62,18 @@ inline absl::StatusOr<std::ofstream> OpenWriteFile(
   return outf;
 }
 
+inline std::pair<FILE*, std::string>
+OpenTmpFile(const char *mkstemp_template, size_t mkstemp_template_max_size) {
+  DCHECK(mkstemp_template);
+  size_t length = strnlen(mkstemp_template, mkstemp_template_max_size);
+  if (length == 0)
+    return std::make_pair(nullptr, "");
+  std::string path(mkstemp_template, length);
+  int fd = mkstemp(path.data());
+  FILE *fp = fdopen(fd, "wb");
+  return std::make_pair(fp, path);
+}
+
 inline absl::StatusOr<mio::mmap_source>
 MmapReadOnlyFile(const std::string &path, uint64_t offset, uint64_t size) {
   std::error_code error;
@@ -72,112 +86,174 @@ MmapReadOnlyFile(const std::string &path, uint64_t offset, uint64_t size) {
 }
 
 template<typename SrcType, typename DestType>
-inline bool ConvertAndWriteInteger(std::ostream &os, SrcType src_val) {
+inline bool ConvertAndWriteInteger(std::ostream *os, SrcType src_val) {
   static_assert(std::is_integral_v<SrcType>);
   static_assert(std::is_integral_v<DestType>);
   DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
   DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
   DestType dest_val = static_cast<DestType>(src_val);
-  return static_cast<bool>(os.write(reinterpret_cast<char *>(&dest_val),
-                                    sizeof(dest_val)));
+  return static_cast<bool>(os->write(reinterpret_cast<char *>(&dest_val),
+                                     sizeof(dest_val)));
 }
 
 template<typename SrcType>
-inline bool ConvertAndWriteUint32(std::ostream &os, SrcType src_val) {
+inline bool ConvertAndWriteUint32(std::ostream *os, SrcType src_val) {
   return ConvertAndWriteInteger<SrcType, uint32_t>(os, src_val);
 }
 
 template<typename SrcType>
-inline bool ConvertAndWriteUint64(std::ostream &os, SrcType src_val) {
+inline bool ConvertAndWriteUint64(std::ostream *os, SrcType src_val) {
   return ConvertAndWriteInteger<SrcType, uint64_t>(os, src_val);
 }
 
-template<typename T>
-inline bool WriteInteger(std::ostream &os, T val, uint32_t size = sizeof(T)) {
-  static_assert(std::is_integral_v<T>);
-  DCHECK(size == sizeof(T) ||
-         (size < sizeof(T) && static_cast<uint64_t>(val) < 1ULL << size * 8));
+template<typename OutputStreamType>
+bool WriteData(OutputStreamType *os, char *str, uint32_t size);
+
+template<>
+inline bool
+WriteData<std::ostream>(std::ostream *os, char *str, uint32_t size) {
+  return static_cast<bool>(os->write(str, size));
+}
+
+template<>
+inline bool WriteData<FILE>(FILE *fp, char *str, uint32_t size) {
+  return fwrite(str, 1, size, fp) == size;
+}
+
+template<typename ValueType, typename OutputStreamType>
+inline bool WriteInteger(OutputStreamType *os, ValueType val,
+                         uint32_t size = sizeof(ValueType)) {
+  static_assert(std::is_integral_v<ValueType>);
+  DCHECK(size == sizeof(ValueType) ||
+         (size < sizeof(ValueType) &&
+          static_cast<uint64_t>(val) < 1ULL << size * 8));
   // Assumes little-endian machine!
-  return static_cast<bool>(os.write(reinterpret_cast<char *>(&val), size));
+  return WriteData<OutputStreamType>(os, reinterpret_cast<char *>(&val), size);
 }
 
+template<typename OutputStreamType>
+inline bool WriteUint32(OutputStreamType *os, uint32_t val,
+                        uint32_t size = sizeof(uint32_t)) {
+  return WriteInteger<uint32_t, OutputStreamType>(os, val, size);
+}
+
+template<typename OutputStreamType>
+inline bool WriteUint64(OutputStreamType *os, uint64_t val,
+                        uint32_t size = sizeof(uint64_t)) {
+  return WriteInteger<uint64_t, OutputStreamType>(os, val, size);
+}
+
+template<typename InputStreamType>
+bool ReadData(InputStreamType *is, char *str, uint32_t size);
+
+template<>
+inline bool ReadData<std::istream>(std::istream *is, char *str, uint32_t size) {
+  return static_cast<bool>(is->read(str, size));
+}
+
+template<>
 inline bool
-WriteUint32(std::ostream &os, uint32_t val, uint32_t size = sizeof(uint32_t)) {
-  return WriteInteger<uint32_t>(os, val, size);
+ReadData<std::ifstream>(std::ifstream *ifs, char *str, uint32_t size) {
+  return static_cast<bool>(ifs->read(str, size));
 }
 
-inline bool
-WriteUint64(std::ostream &os, uint64_t val, uint32_t size = sizeof(uint64_t)) {
-  return WriteInteger<uint64_t>(os, val, size);
+template<>
+inline bool ReadData<FILE>(FILE *fp, char *str, uint32_t size) {
+  return fread(str, size, 1, fp) == size;
 }
 
-template<typename SrcType, typename DestType>
-inline DestType ReadAndConvertInteger(std::istream &is,
+template<typename SrcType, typename DestType, typename InputStreamType>
+inline DestType ReadAndConvertInteger(InputStreamType *is,
                                       uint64_t *offset = nullptr) {
   static_assert(std::is_integral_v<SrcType>);
   static_assert(std::is_integral_v<DestType>);
   SrcType src_val;
   if (offset)
     *offset += sizeof(src_val);
-  if (!is.read(reinterpret_cast<char *>(&src_val), sizeof(src_val)))
+  if (!ReadData<InputStreamType>(is, reinterpret_cast<char *>(&src_val),
+                                 sizeof(src_val)))
     return std::numeric_limits<DestType>::max();
   DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
   DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
   return static_cast<DestType>(src_val);
 }
 
-template<typename DestType>
-inline DestType ReadUint32AndConvert(std::istream &is,
+template<typename DestType, typename InputStreamType>
+inline DestType ReadUint32AndConvert(InputStreamType *is,
                                      uint64_t *offset = nullptr) {
-  return ReadAndConvertInteger<uint32_t, DestType>(is, offset);
+  return ReadAndConvertInteger<uint32_t, DestType, InputStreamType>(is, offset);
 }
 
-template<typename DestType>
-inline DestType ReadUint64AndConvert(std::istream &is,
+template<typename DestType, typename InputStreamType>
+inline DestType ReadUint64AndConvert(InputStreamType *is,
                                      uint64_t *offset = nullptr) {
-  return ReadAndConvertInteger<uint64_t, DestType>(is, offset);
+  return ReadAndConvertInteger<uint64_t, DestType, InputStreamType>(is, offset);
 }
 
-template<typename T>
-inline T ReadInteger(std::istream &is, uint64_t *offset = nullptr) {
-  static_assert(std::is_integral_v<T>);
-  T val;
+template<typename ValueType, typename InputStreamType>
+inline ValueType ReadInteger(InputStreamType *is, uint64_t *offset = nullptr) {
+  static_assert(std::is_integral_v<ValueType>);
+  ValueType val;
   if (offset)
     *offset += sizeof(val);
-  if (is.read(reinterpret_cast<char *>(&val), sizeof(val)))
+  if (ReadData<InputStreamType>(is, reinterpret_cast<char *>(&val),
+                                sizeof(val)))
     return val;
-  return std::numeric_limits<T>::max();
+  return std::numeric_limits<ValueType>::max();
 }
 
-inline uint32_t ReadUint32(std::istream &is, uint64_t *offset = nullptr) {
-  return ReadInteger<uint32_t>(is, offset);
+template<typename InputStreamType>
+inline uint32_t ReadUint32(InputStreamType *is, uint64_t *offset = nullptr) {
+  return ReadInteger<uint32_t, InputStreamType>(is, offset);
 }
 
-inline uint64_t ReadUint64(std::istream &is, uint64_t *offset = nullptr) {
-  return ReadInteger<uint64_t>(is, offset);
+template<typename InputStreamType>
+inline uint64_t ReadUint64(InputStreamType *is, uint64_t *offset = nullptr) {
+  return ReadInteger<uint64_t, InputStreamType>(is, offset);
 }
 
-template<typename T>
-inline T ReadIntegerAtOffset(std::istream &is, uint64_t *offset) {
+template<typename InputStreamType>
+bool Seek(InputStreamType *is, uint64_t offset);
+
+template<>
+inline bool Seek<std::istream>(std::istream *is, uint64_t offset) {
+  return static_cast<bool>(is->seekg(offset));
+}
+
+template<>
+inline bool Seek<std::ifstream>(std::ifstream *ifs, uint64_t offset) {
+  return static_cast<bool>(ifs->seekg(offset));
+}
+
+template<>
+inline bool Seek<FILE>(FILE *fp, uint64_t offset) {
+  return fseek(fp, offset, SEEK_SET) == 0;
+}
+
+template<typename ValueType, typename InputStreamType>
+inline ValueType ReadIntegerAtOffset(InputStreamType *is, uint64_t *offset) {
   DCHECK(offset);
-  if (is.seekg(*offset))
-    return ReadInteger<T>(is, offset);
-  return std::numeric_limits<T>::max();
+  if (Seek<InputStreamType>(is, *offset))
+    return ReadInteger<ValueType, InputStreamType>(is, offset);
+  return std::numeric_limits<ValueType>::max();
 }
 
-inline uint32_t ReadUint32AtOffset(std::istream &is, uint64_t *offset) {
-  return ReadIntegerAtOffset<uint32_t>(is, offset);
+template<typename InputStreamType>
+inline uint32_t ReadUint32AtOffset(InputStreamType *is, uint64_t *offset) {
+  return ReadIntegerAtOffset<uint32_t, InputStreamType>(is, offset);
 }
 
-inline uint64_t ReadUint64AtOffset(std::istream &is, uint64_t *offset) {
-  return ReadIntegerAtOffset<uint64_t>(is, offset);
+template<typename InputStreamType>
+inline uint64_t ReadUint64AtOffset(InputStreamType *is, uint64_t *offset) {
+  return ReadIntegerAtOffset<uint64_t, InputStreamType>(is, offset);
 }
 
-inline bool EatString(std::istream &is, absl::string_view str,
+template<typename InputStreamType>
+inline bool EatString(InputStreamType *is, absl::string_view str,
                       uint64_t *offset = nullptr) {
   auto size = str.size();
   auto buf = std::make_unique<char[]>(size);
-  if (is.read(buf.get(), size)) {
+  if (ReadData<InputStreamType>(is, buf.get(), size)) {
     if (offset)
       *offset += size;
     return str == absl::string_view(buf.get(), size);

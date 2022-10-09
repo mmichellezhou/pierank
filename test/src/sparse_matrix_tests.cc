@@ -80,8 +80,9 @@ protected:
       CheckAsh219ColIndex(mat_mmap);
     }
     CheckAsh219ColIndex(mat);
-    auto mat_by_row = mat.ChangeIndexDim();
-    CheckAsh219RowIndex(*mat_by_row.get());
+    auto mat_by_row_or = mat.ChangeIndexDim();
+    EXPECT_OK(mat_by_row_or);
+    CheckAsh219RowIndex(*mat_by_row_or->get());
   }
 };
 

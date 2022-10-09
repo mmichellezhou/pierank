@@ -5,6 +5,7 @@
 #ifndef PIERANK_SPARSE_MATRIX_H_
 #define PIERANK_SPARSE_MATRIX_H_
 
+#include <cstdio>
 #include <limits>
 #include <glog/logging.h>
 
@@ -54,9 +55,10 @@ inline std::string MatrixMarketToPieRankMatrixPath(
 template<typename PosType, typename IdxType>
 class SparseMatrix {
 public:
-  using PosRange = std::pair<PosType, PosType>;
+  // <min_pos, max_pos, nnz>
+  using PosRange = std::tuple<PosType, PosType, IdxType>;
 
-  using PosRanges = std::vector<std::pair<PosType, PosType>>;
+  using PosRanges = std::vector<PosRange>;
 
   using FlexIdxType = FlexIndex<IdxType>;
 
@@ -101,14 +103,18 @@ public:
 
   absl::Status status() const { return status_; }
 
+  void WriteAllButPos(std::ostream *os) const {
+    *os << kPieRankMatrixFileMagicNumbers;
+    ConvertAndWriteUint64(os, rows_);
+    ConvertAndWriteUint64(os, cols_);
+    ConvertAndWriteUint64(os, nnz_);
+    WriteUint32(os, index_dim_);
+    *os << index_;
+  }
+
   friend std::ostream &
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
-    os << kPieRankMatrixFileMagicNumbers;
-    ConvertAndWriteUint64(os, matrix.rows_);
-    ConvertAndWriteUint64(os, matrix.cols_);
-    ConvertAndWriteUint64(os, matrix.nnz_);
-    WriteUint32(os, matrix.index_dim_);
-    os << matrix.index_;
+    matrix.WriteAllButPos(&os);
     os << matrix.pos_;
     return os;
   }
@@ -116,11 +122,11 @@ public:
   // Reads {rows, cols, nnz} from `is`
   uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
     uint64_t offset = 0;
-    if (EatString(is, kPieRankMatrixFileMagicNumbers,&offset)) {
-      rows_ = ReadUint64AndConvert<PosType>(is, &offset);
-      cols_ = ReadUint64AndConvert<PosType>(is, &offset);
-      nnz_ = ReadUint64AndConvert<IdxType>(is, &offset);
-      index_dim_ = ReadUint32(is, &offset);
+    if (EatString(&is, kPieRankMatrixFileMagicNumbers,&offset)) {
+      rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
+      cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
+      nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
+      index_dim_ = ReadUint32(&is, &offset);
       if (!is)
         status_.Update(absl::InternalError("Error read PRM file header"));
     } else
@@ -204,57 +210,83 @@ public:
     return absl::OkStatus();
   }
 
-  static PosRanges SplitIndexDim(const FlexIdxType &index, IdxType nnz,
-                                 uint32_t num_pieces, bool balance_nnz = true) {
+  static PosRanges
+  SplitIndexDimByPos(const FlexIdxType &index, uint32_t num_ranges) {
+    DCHECK_GT(num_ranges, 0);
     if (index.NumItems() == 0)
-      return {std::make_pair(0, 0)};
+      return {std::make_tuple(0, 0, 0)};
     PosType num_index_pos = index.NumItems() - 1;
-    if (num_pieces == 1)
-      return {std::make_pair(0, num_index_pos)};
+    auto range_nnz = std::numeric_limits<IdxType>::max();
+    if (num_ranges == 1)
+      return {std::make_tuple(0, num_index_pos, range_nnz)};
     PosRanges res;
-    if (balance_nnz) {
-      IdxType max_nnz_per_range = (nnz + num_pieces - 1) / num_pieces;
-      PosType avg_nnz_per_pos = (nnz + num_index_pos - 1) / num_index_pos;
-      PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
-      pos_step_size = std::min(pos_step_size, num_index_pos);
-      pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
-      PosType first = 0;
-      while (first < num_index_pos) {
-        PosType last = first + 1;
-        IdxType range_nnz = index[last] - index[first];
-        if (range_nnz < max_nnz_per_range) {
-          PosType step_size = pos_step_size;
-          while (step_size > 0 && last < num_index_pos) {
-            PosType new_last = std::min(last + step_size, num_index_pos);
-            IdxType step_nnz = index[new_last] - index[last];
-            if (range_nnz + step_nnz <= max_nnz_per_range) {
-              range_nnz += step_nnz;
-              last = new_last;
-              if (step_size * 2 <= pos_step_size)
-                step_size *= 2;
-            } else
-              step_size /= 2;
-          }
-        }
-        res.push_back(std::make_pair(first, last));
-        first = last;
-      }
-    } else {
-      PosType range_size = (num_index_pos + num_pieces - 1) / num_pieces;
-      for (PosType first = 0; first < num_index_pos; first += range_size) {
-        PosType last = std::min(first + range_size, num_index_pos);
-        res.push_back(std::make_pair(first, last));
-      }
+
+    PosType range_size = (num_index_pos + num_ranges - 1) / num_ranges;
+    for (PosType first = 0; first < num_index_pos; first += range_size) {
+      PosType last = std::min(first + range_size, num_index_pos);
+      res.push_back(std::make_tuple(first, last, range_nnz));
     }
+
+    DCHECK_EQ(res.size(), num_ranges);
     return res;
   }
 
-  PosRanges SplitIndexDim(uint32_t num_pieces, bool balance_nnz = true) const {
-    DCHECK(this->status_.ok());
-    return SplitIndexDim(index_, nnz_, num_pieces, balance_nnz);
+  static PosRanges SplitIndexDimByNnz(const FlexIdxType &index, IdxType nnz,
+                                      uint32_t num_ranges) {
+    DCHECK_GT(num_ranges, 0);
+    if (index.NumItems() == 0) {
+      DCHECK_EQ(nnz, 0);
+      return {std::make_tuple(0, 0, 0)};
+    }
+    PosType num_index_pos = index.NumItems() - 1;
+    if (num_ranges == 1)
+      return {std::make_tuple(0, num_index_pos, nnz)};
+    PosRanges res;
+    IdxType max_nnz_per_range = (nnz + num_ranges - 1) / num_ranges;
+    PosType avg_nnz_per_pos = (nnz + num_index_pos - 1) / num_index_pos;
+    PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
+    pos_step_size = std::min(pos_step_size, num_index_pos);
+    pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
+    PosType first = 0;
+    while (res.size() < num_ranges - 1) {
+      DCHECK_LT(first, num_index_pos);
+      PosType last = first + 1;
+      IdxType range_nnz = index[last] - index[first];
+      if (range_nnz < max_nnz_per_range) {
+        PosType step_size = pos_step_size;
+        while (step_size > 0 && last < num_index_pos) {
+          PosType new_last = std::min(last + step_size, num_index_pos);
+          IdxType step_nnz = index[new_last] - index[last];
+          if (range_nnz + step_nnz <= max_nnz_per_range) {
+            range_nnz += step_nnz;
+            last = new_last;
+            if (step_size * 2 <= pos_step_size)
+              step_size *= 2;
+          } else
+            step_size /= 2;
+        }
+      }
+      res.push_back(std::make_tuple(first, last, range_nnz));
+      first = last;
+    }
+
+    res.push_back(std::make_tuple(first, num_index_pos,
+                                  index[num_index_pos] - index[first]));
+    DCHECK_EQ(res.size(), num_ranges);
+    return res;
   }
 
-  UniquePtr ChangeIndexDim() const {
+  PosRanges SplitIndexDimByPos(uint32_t num_ranges) const {
+    DCHECK(this->status_.ok());
+    return SplitIndexDimByPos(index_, num_ranges);
+  }
+
+  PosRanges SplitIndexDimByNnz(uint32_t num_ranges) const {
+    DCHECK(this->status_.ok());
+    return SplitIndexDimByNnz(index_, nnz_, num_ranges);
+  }
+
+  absl::StatusOr<UniquePtr> ChangeIndexDim(uint32_t num_ranges = 1) const {
     auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
     res->rows_ = rows_;
     res->cols_ = cols_;
@@ -269,9 +301,9 @@ public:
         nbr.IncItem(pos_[i]);
     }
 
-    auto [min_item_size, shift_by_min_val] = index_.MinEncode();
-    CHECK(!shift_by_min_val) << "Not yet supported";
-    FlexIdxType idx(min_item_size);
+    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
+    CHECK(!idx_shift_by_min_val) << "Not yet supported";
+    FlexIdxType idx(idx_item_size);
     IdxType nnz = 0;
     for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
       idx.Append(nnz);
@@ -280,27 +312,52 @@ public:
     DCHECK_EQ(nnz, nnz_);
     if (idx[idx.NumItems() - 1] != nnz)
       idx.Append(nnz);
+    auto ranges = SplitIndexDimByNnz(idx, nnz, num_ranges);
+    // std::cout << PosRangesDebugString(ranges);
 
     nbr.Reset();
-    std::tie(min_item_size, shift_by_min_val) = pos_.MinEncode();
-    CHECK(!shift_by_min_val) << "Not yet supported";
-    FlexPosType pos(min_item_size, nnz);
-    for (PosType p = 0; p < index_pos_end; ++p) {
-      for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
-        auto pos_i = pos_[i];
-        pos.SetItem(idx[pos_i] + nbr[pos_i], p);
-        nbr.IncItem(pos_i);
+    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
+    CHECK(!pos_shift_by_min_val) << "Not yet supported";
+    nnz = 0;
+
+    for (uint32_t r = 0; r < num_ranges; ++r) {
+      FlexPosType pos(pos_item_size, std::get<2>(ranges[r]));
+      IdxType range_nnz = 0;
+      auto [min_pos, max_pos, size] = ranges[r];
+      for (PosType p = 0; p < index_pos_end; ++p) {
+        for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
+          auto pos_i = pos_[i];
+          if (pos_i >= min_pos && pos_i < max_pos) {
+            pos.SetItem(idx[pos_i] + nbr[pos_i] - nnz, p);
+            nbr.IncItem(pos_i);
+            ++range_nnz;
+          }
+        }
+      }
+      nnz += range_nnz;
+      if (num_ranges == 1)
+        res->pos_ = std::move(pos);
+      else {
+        CHECK(false) << "Not yet supported";
       }
     }
+    DCHECK_EQ(nnz, nnz_);
 
     res->index_ = std::move(idx);
-    res->pos_ = std::move(pos);
+    if (num_ranges > 1) {
+      CHECK(false) << "Not yet supported";
+    }
+
     return res;
   }
 
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
     std::string res;
     std::string tab(indent, ' ');
+    if (!status_.ok()) {
+      absl::StrAppend(&res, tab, status_.ToString(), "\n");
+      return res;
+    }
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
@@ -312,6 +369,20 @@ public:
     return res;
   }
 
+  static std::string PosRangeDebugString(const PosRange &range) {
+    std::string res;
+    absl::StrAppend(&res, "min: ", std::get<0>(range));
+    absl::StrAppend(&res, ", max: ", std::get<1>(range));
+    absl::StrAppend(&res, ", size: ", std::get<2>(range));
+    return res;
+  }
+
+  static std::string PosRangesDebugString(const PosRanges &ranges) {
+    std::string res;
+    for (const auto &r : ranges)
+      absl::StrAppend(&res, PosRangeDebugString(r), "\n");
+    return res;
+  }
 
 protected:
   absl::Status status_;
