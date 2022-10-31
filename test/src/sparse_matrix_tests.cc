@@ -60,38 +60,82 @@ void CheckAsh219RowIndex(const SparseMatrix<uint32_t, uint64_t> &mat) {
     EXPECT_EQ(pos[idx], col_ids[idx - index[218]]);
 }
 
-class SparseMatrixTestFixture : public ::testing::TestWithParam<std::string> {
+TEST(SparseMatrixTests, ReadMtxFile) {
+  auto file_path = TestDataFilePath("ash219.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  EXPECT_EQ(mat.Index().ItemSize(), 8);
+  EXPECT_EQ(mat.Pos().ItemSize(), 4);
+  CheckAsh219ColIndex(mat);
+
+  auto prm_file = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_file));
+  } else {
+    SparseMatrix<uint32_t, uint64_t> mat0;
+    EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_file));
+    EXPECT_EQ(mat, mat0);
+  }
+}
+
+class PieRankMatrixTestFixture : public ::testing::TestWithParam<std::string> {
 protected:
   void Run(const std::string &file_path) {
     SparseMatrix<uint32_t, uint64_t> mat;
-    if (MatrixMarketIo::HasMtxFileExtension(file_path)) {
-      EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
-      EXPECT_EQ(mat.Index().ItemSize(), 8);
-      EXPECT_EQ(mat.Pos().ItemSize(), 4);
-      if (kGeneratePieRankMatrixFile)
-        EXPECT_OK(mat.WritePieRankMatrixFile(file_path));
-    }
-    else {
-      EXPECT_OK(mat.ReadPieRankMatrixFile(file_path));
-      EXPECT_EQ(mat.Index().ItemSize(), 2);
-      EXPECT_EQ(mat.Pos().ItemSize(), 1);
-      SparseMatrix<uint32_t, uint64_t> mat_mmap(file_path, /*mmap=*/true);
-      EXPECT_TRUE(mat_mmap.ok());
-      CheckAsh219ColIndex(mat_mmap);
-    }
-    CheckAsh219ColIndex(mat);
-    auto mat_by_row_or = mat.ChangeIndexDim();
-    EXPECT_OK(mat_by_row_or);
-    CheckAsh219RowIndex(*mat_by_row_or->get());
+    uint32_t index_dim = IndexDimInPieRankMatrixPath(file_path);
+    EXPECT_OK(mat.ReadPieRankMatrixFile(file_path));
+    EXPECT_EQ(mat.Index().ItemSize(), 2);
+    EXPECT_EQ(mat.Pos().ItemSize(), 1);
+    EXPECT_EQ(mat.IndexDim(), index_dim);
+    CHECK_LT(index_dim, 2);
+    if (index_dim) CheckAsh219ColIndex(mat);
+    else CheckAsh219RowIndex(mat);
+
+    SparseMatrix<uint32_t, uint64_t> mat_mmap(file_path, /*mmap=*/true);
+    EXPECT_OK(mat_mmap.MmapPieRankMatrixFile(file_path));
+    EXPECT_TRUE(mat_mmap.ok());
+    if (index_dim) CheckAsh219ColIndex(mat_mmap);
+    else CheckAsh219RowIndex(mat_mmap);
+
+    SparseMatrix<uint32_t, uint64_t> mat_inverse0;
+    std::string inverse_prm_file = PieRankMatrixPathAfterIndexChange(file_path);
+    EXPECT_OK(mat_inverse0.ReadPieRankMatrixFile(inverse_prm_file));
+
+    auto mat_inverse_or = mat.ChangeIndexDim();
+    EXPECT_OK(mat_inverse_or);
+    auto mat_inverse = std::move(mat_inverse_or).value();
+    if (index_dim) CheckAsh219RowIndex(*mat_inverse);
+    else CheckAsh219ColIndex(*mat_inverse);
+    EXPECT_EQ(*mat_inverse, mat_inverse0);
+
+    auto tmp_dir = MakeTmpDir("./");
+    CHECK(!tmp_dir.empty());
+    auto tmp_path = absl::StrCat(tmp_dir, kPathSeparator,
+                                 FileNameInPath(inverse_prm_file));
+    auto mat_inverse_mmap_or = mat.ChangeIndexDimByMmap(
+        tmp_path, /*max_nnz_per_range=*/32);
+    EXPECT_OK(mat_inverse_mmap_or);
+    auto mat_inverse_mmap = std::move(mat_inverse_mmap_or).value();
+    if (index_dim) CheckAsh219RowIndex(*mat_inverse_mmap);
+    else CheckAsh219ColIndex(*mat_inverse_mmap);
+    EXPECT_EQ(*mat_inverse_mmap, mat_inverse0);
+
+    SparseMatrix<uint32_t, uint64_t> mat_inverse2(tmp_path);
+    EXPECT_TRUE(mat_inverse2.ok());
+    EXPECT_EQ(mat_inverse2, mat_inverse0);
+
+    std::remove(tmp_path.c_str());
+    rmdir(tmp_dir.c_str());
   }
 };
 
-TEST_P(SparseMatrixTestFixture, RankAsh219) {
+TEST_P(PieRankMatrixTestFixture, RankAsh219) {
   std::string file_path = GetParam();
   Run(file_path);
 }
 
-INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, SparseMatrixTestFixture,
-    ::testing::Values(TestDataFilePath("ash219.mtx"),
-                      TestDataFilePath("ash219.prm"))
+INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, PieRankMatrixTestFixture,
+    ::testing::Values(TestDataFilePath("ash219.i0.prm"),
+                      TestDataFilePath("ash219.i1.prm"))
 );

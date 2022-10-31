@@ -11,6 +11,7 @@
 
 #include "absl/status/status.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 
@@ -28,13 +29,48 @@ inline constexpr absl::string_view kMatrixMarketFileExtension = ".mtx";
 
 // Returns an empty string on error.
 inline std::string MatrixMarketToPieRankMatrixPath(
-    absl::string_view mtx_path, absl::string_view prm_dir = "") {
+    absl::string_view mtx_path, bool change_index_dim = false,
+    absl::string_view prm_dir = "") {
   if (!absl::ConsumeSuffix(&mtx_path, kMatrixMarketFileExtension))
     return "";
+  std::string_view index_extension = change_index_dim ? ".i0" : ".i1";
   if (prm_dir.empty())
-    return absl::StrCat(mtx_path, kPieRankMatrixFileExtension);
+    return absl::StrCat(mtx_path, index_extension, kPieRankMatrixFileExtension);
   return absl::StrCat(prm_dir, kPathSeparator, FileNameInPath(mtx_path),
-                      kPieRankMatrixFileExtension);
+                      index_extension, kPieRankMatrixFileExtension);
+}
+
+// Returns an empty string on error.
+inline std::string
+PieRankMatrixPathAfterIndexChange(absl::string_view prm_path) {
+  auto prm_dir = DirectoryInPath(prm_path);
+  auto prm_file_with_extensions = FileNameAndExtensionsInPath(prm_path);
+  DCHECK_GE(prm_file_with_extensions.size(), 3);
+  if (prm_file_with_extensions.size() < 3)
+    return "";
+  auto index_extension_idx = prm_file_with_extensions.size() - 2;
+  if (prm_file_with_extensions[index_extension_idx] == "i0")
+    prm_file_with_extensions[index_extension_idx] = "i1";
+  else if (prm_file_with_extensions[index_extension_idx] == "i1")
+    prm_file_with_extensions[index_extension_idx] = "i0";
+  else
+    return "";
+  auto prm_file_name = absl::StrJoin(prm_file_with_extensions, ".");
+  return absl::StrCat(prm_dir, kPathSeparator, prm_file_name);
+}
+
+// Returns (uint32_t)-1 on error.
+inline uint32_t IndexDimInPieRankMatrixPath(absl::string_view prm_path) {
+  auto prm_file_with_extensions = FileNameAndExtensionsInPath(prm_path);
+  DCHECK_GE(prm_file_with_extensions.size(), 3);
+  if (prm_file_with_extensions.size() < 3)
+    return std::numeric_limits<uint32_t>::max();
+  auto index_extension_idx = prm_file_with_extensions.size() - 2;
+  if (prm_file_with_extensions[index_extension_idx] == "i0")
+    return 0;
+  if (prm_file_with_extensions[index_extension_idx] == "i1")
+    return 1;
+  return std::numeric_limits<uint32_t>::max();
 }
 
 /* Example SparseMatrix:
@@ -102,6 +138,17 @@ public:
   bool ok() const { return status_.ok(); }
 
   absl::Status status() const { return status_; }
+
+  friend bool operator==(const SparseMatrix<PosType, IdxType> &lhs,
+                         const SparseMatrix<PosType, IdxType> &rhs) {
+    if (lhs.rows_ != rhs.rows_) return false;
+    if (lhs.cols_ != rhs.cols_) return false;
+    if (lhs.nnz_ != rhs.nnz_) return false;
+    if (lhs.index_dim_ != rhs.index_dim_) return false;
+    if (lhs.index_ != rhs.index_) return false;
+    if (lhs.pos_ != rhs.pos_) return false;
+    return true;
+  }
 
   void WriteAllButPos(std::ostream *os) const {
     *os << kPieRankMatrixFileMagicNumbers;
@@ -348,6 +395,97 @@ public:
       CHECK(false) << "Not yet supported";
     }
 
+    return res;
+  }
+
+  // Returns a memory-mapped SparseMatrix with its index dim changed.
+  absl::StatusOr<UniquePtr> ChangeIndexDimByMmap(
+      const std::string &path,
+      uint64_t max_nnz_per_range = std::numeric_limits<uint32_t>::max()) const {
+    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
+    res->rows_ = rows_;
+    res->cols_ = cols_;
+    res->nnz_ = nnz_;
+    res->index_dim_ = index_dim_ ? 0 : 1;
+
+    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
+    FlexPosType nbr(pos_.ItemSize(), new_index_dim_size);
+    auto index_pos_end = IndexPosEnd();
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
+        nbr.IncItem(pos_[i]);
+    }
+
+    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
+    CHECK(!idx_shift_by_min_val) << "Not yet supported";
+    FlexIdxType idx(idx_item_size);
+    IdxType nnz = 0;
+    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
+      idx.Append(nnz);
+      nnz += nbr[p];
+    }
+    DCHECK_EQ(nnz, nnz_);
+    if (idx[idx.NumItems() - 1] != nnz)
+      idx.Append(nnz);
+    uint32_t num_ranges = (nnz + max_nnz_per_range - 1) / max_nnz_per_range;
+    auto ranges = SplitIndexDimByNnz(idx, nnz, num_ranges);
+    // std::cout << PosRangesDebugString(ranges);
+
+    nbr.Reset();
+    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
+    CHECK(!pos_shift_by_min_val) << "Not yet supported";
+    nnz = 0;
+
+    // <num_items, file_path> for each range's pos FlexIndex
+    std::vector<std::pair<uint64_t, std::string>> pos_items_and_paths;
+    for (uint32_t r = 0; r < num_ranges; ++r) {
+      FlexPosType pos(pos_item_size, std::get<2>(ranges[r]));
+      IdxType range_nnz = 0;
+      auto [min_pos, max_pos, size] = ranges[r];
+      for (PosType p = 0; p < index_pos_end; ++p) {
+        for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
+          auto pos_i = pos_[i];
+          if (pos_i >= min_pos && pos_i < max_pos) {
+            pos.SetItem(idx[pos_i] + nbr[pos_i] - nnz, p);
+            nbr.IncItem(pos_i);
+            ++range_nnz;
+          }
+        }
+      }
+      nnz += range_nnz;
+      auto[fp, tmp_path] = OpenTmpFile(path);
+      DCHECK_NOTNULL(fp);
+      pos_items_and_paths.push_back(std::make_pair(pos.NumItems(), tmp_path));
+      // TODO: Support shift_by_min_value
+      if (!pos.WriteValues(fp, pos_item_size, /*shift_by_min_val=*/false))
+        return absl::InternalError("Error write file: " + tmp_path);
+      fclose(fp);
+    }
+    DCHECK_EQ(nnz, nnz_);
+
+    DCHECK_EQ(pos_items_and_paths.size(), num_ranges);
+    auto file_or = OpenWriteFile(path);
+    if (!file_or.ok()) return file_or.status();
+    auto ofs = std::move(file_or).value();
+    res->index_ = std::move(idx);
+    res->WriteAllButPos(&ofs);
+    res->pos_.SetMinMaxValues(0, index_pos_end - 1);
+    res->pos_.WriteAllButValues(&ofs, pos_item_size, /*shift_by_min=*/false);
+    if (!WriteUint64(&ofs, pos_item_size * nnz))
+      return absl::InternalError("Error write file: " + path);
+    for (const auto &pos_items_and_path : pos_items_and_paths) {
+      auto[pos_items, pos_path] = pos_items_and_path;
+      auto tmp_file_or = OpenReadFile(pos_path);
+      if (!tmp_file_or.ok()) return tmp_file_or.status();
+      FlexPosType pos(pos_item_size, pos_items);
+      pos.ReadValues(&*tmp_file_or);
+      DCHECK_EQ(pos.NumItems(), pos_items);
+      WriteData(&ofs, pos.Data(), pos_item_size * pos_items);
+      std::remove(pos_path.c_str());
+    }
+    ofs.close();
+
+    res.reset(new SparseMatrix<PosType, IdxType>(path, /*mmap=*/true));
     return res;
   }
 

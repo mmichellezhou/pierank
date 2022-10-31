@@ -61,5 +61,5 @@ TEST_P(PageRankTestFixture, RankAsh219) {
 
 INSTANTIATE_TEST_SUITE_P(PageRankTests, PageRankTestFixture,
     ::testing::Values(TestDataFilePath("ash219.mtx"),
-                      TestDataFilePath("ash219.prm"))
+                      TestDataFilePath("ash219.i1.prm"))
 );

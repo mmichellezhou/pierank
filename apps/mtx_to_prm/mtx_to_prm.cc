@@ -22,8 +22,9 @@ int main(int argc, char **argv) {
   std::string mtx_file = absl::GetFlag(FLAGS_mtx_file);
   std::cout << "mtx_file: " << mtx_file << std::endl;
   std::string output_dir = absl::GetFlag(FLAGS_output_dir);
-  std::string prm_file = pierank::MatrixMarketToPieRankMatrixPath(mtx_file,
-                                                                  output_dir);
+  bool change_index_dim = absl::GetFlag(FLAGS_output_row_major);
+  std::string prm_file = pierank::MatrixMarketToPieRankMatrixPath(
+      mtx_file, change_index_dim, output_dir);
   CHECK(!prm_file.empty()) << "Bad .mtx file: " << mtx_file;
   std::cout << "prm_file: " << prm_file << std::endl;
 
@@ -33,7 +34,7 @@ int main(int argc, char **argv) {
   std::cout << "mtx_read_time: " << duration << std::endl;
 
   const auto *mat_out = &mat;
-  if (absl::GetFlag(FLAGS_output_row_major)) {
+  if (change_index_dim) {
     start_time = absl::Now();
     auto mat_out_or = mat.ChangeIndexDim();
     CHECK(mat_out_or.ok());

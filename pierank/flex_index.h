@@ -92,9 +92,13 @@ public:
     max_val_ = std::max(max_val_, val);
   }
 
+  inline const char *Data() const {
+    return vals_mmap_.empty() ? vals_.data() : vals_mmap_.data();
+  }
+
   T operator[](uint64_t idx) const {
     DCHECK(vals_.empty() || vals_mmap_.empty());
-    auto *ptr = vals_mmap_.empty() ? vals_.data() : vals_mmap_.data();
+    auto *ptr = Data();
     ptr += idx * item_size_;
 
     T res = 0;
@@ -107,6 +111,7 @@ public:
   }
 
   void SetItem(uint64_t idx, T value) {
+    DCHECK(vals_mmap_.empty());
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
     auto *ptr = vals_.data() + idx * item_size_;
     PRK_MEMCPY(ptr, &value, item_size_);
@@ -115,6 +120,7 @@ public:
   }
 
   T IncItem(uint64_t idx, T delta = 1) {
+    DCHECK(vals_mmap_.empty());
     DCHECK_GT(delta, 0);
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
     T res = 0;
@@ -128,14 +134,18 @@ public:
 
   uint32_t ItemSize() const { return item_size_; }
 
-  uint64_t NumItems() const {
+  uint64_t Size() const {
     if (vals_.size()) {
       DCHECK(vals_mmap_.empty());
-      DCHECK_EQ(vals_.size() % item_size_, 0);
-      return vals_.size() / item_size_;
+      return vals_.size();
     }
-    DCHECK_EQ(vals_mmap_.size() % item_size_, 0);
-    return vals_mmap_.size() / item_size_;
+    return vals_mmap_.size();
+  }
+
+  uint64_t NumItems() const {
+    DCHECK_GT(item_size_, 0);
+    DCHECK_EQ(Size() % item_size_, 0);
+    return Size() / item_size_;
   }
 
   T MinValue() const { return min_val_; }
@@ -149,10 +159,40 @@ public:
 
   bool ShiftByMinValue() const { return shift_by_min_val_; }
 
-  void Reset() { std::memset(vals_.data(), 0, vals_.size()); }
+  void Reset() {
+    DCHECK(vals_mmap_.empty());
+    std::memset(vals_.data(), 0, vals_.size());
+  }
 
   std::pair<uint32_t, bool> MinEncode() const {
     return MinEncode(max_val_, min_val_);
+  }
+
+  friend bool operator==(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
+    CHECK_EQ(lhs.shift_by_min_val_, rhs.shift_by_min_val_) << "Not supported";
+    if (lhs.item_size_ == rhs.item_size_) {
+      if (lhs.Size() != rhs.Size()) return false;
+      return memcmp(lhs.Data(), rhs.Data(), lhs.Size()) == 0;
+    }
+    if (lhs.NumItems() != rhs.NumItems()) return false;
+    for (uint64_t i = 0; i < lhs.NumItems(); ++i) {
+      if (lhs[i] != rhs[i]) return false;
+    }
+    return true;
+  }
+
+  friend bool operator!=(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
+    return !(lhs == rhs);
+  }
+
+  bool WriteAllButValues(std::ostream *os, uint32_t item_size,
+                         bool shift_by_min_value) const {
+    if (!WriteUint32(os, item_size)) return false;
+    if (!ConvertAndWriteUint32(os, shift_by_min_value)) return false;
+    CHECK(shift_by_min_val_ == shift_by_min_value || shift_by_min_value);
+    if (!ConvertAndWriteUint64(os, min_val_)) return false;
+    if (!ConvertAndWriteUint64(os, max_val_)) return false;
+    return true;
   }
 
   template<typename OutputStreamType>
@@ -195,13 +235,10 @@ public:
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
     auto [min_item_size, shift_by_min_val] = index.MinEncode();
-    if (!WriteUint32(&os, min_item_size)) return os;
-    if (!ConvertAndWriteUint32(&os, shift_by_min_val)) return os;
-    CHECK(index.ShiftByMinValue() == shift_by_min_val || shift_by_min_val);
-    if (!ConvertAndWriteUint64(&os, index.MinValue())) return os;
-    if (!ConvertAndWriteUint64(&os, index.MaxValue())) return os;
-    if (!index.WriteValues(&os, min_item_size, shift_by_min_val)) return os;
-
+    if (!index.WriteAllButValues(&os, min_item_size, shift_by_min_val))
+      return os;
+    if (!index.WriteValues(&os, min_item_size, shift_by_min_val))
+      return os;
     return os;
   }
 

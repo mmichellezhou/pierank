@@ -31,12 +31,31 @@ inline constexpr absl::string_view kPathSeparator = "/";
 inline absl::string_view
 FileNameInPath(absl::string_view path, bool with_extension = true) {
   auto sep = path.rfind(kPathSeparator);
-  if (sep == absl::string_view::npos)
-    return path;
   auto dot = path.rfind('.');
   if (with_extension || dot == absl::string_view::npos || dot <= sep + 1)
     return path.substr(sep + 1);
   return path.substr(sep + 1, dot - sep - 1);
+}
+
+// Get file name from path with multiple extensions.
+// The returned vector `res` has the following structure:
+// res[0]: file name without any extensions
+// res[1]: first extension (without the dot)
+// ...
+// res[n]: n-th extension (without the dot)
+// Ex: abc.ext1.ext2.ext3 -> res[] = { "abc", "ext1", "ext2", "ext3" }
+inline std::vector<absl::string_view>
+FileNameAndExtensionsInPath(absl::string_view path) {
+  auto sep = path.rfind(kPathSeparator);
+  path = path.substr(sep + 1);
+  std::vector<absl::string_view> res;
+  while (!path.empty()) {
+    auto dot = path.find('.');
+    res.push_back(path.substr(0, dot));
+    if (dot == absl::string_view::npos) break;
+    path = path.substr(dot + 1);
+  }
+  return res;
 }
 
 inline absl::string_view DirectoryInPath(absl::string_view path) {
@@ -63,15 +82,21 @@ inline absl::StatusOr<std::ofstream> OpenWriteFile(
 }
 
 inline std::pair<FILE*, std::string>
-OpenTmpFile(const char *mkstemp_template, size_t mkstemp_template_max_size) {
-  DCHECK(mkstemp_template);
-  size_t length = strnlen(mkstemp_template, mkstemp_template_max_size);
-  if (length == 0)
+OpenTmpFile(const std::string &mkstemp_template_prefix) {
+  if (mkstemp_template_prefix.empty())
     return std::make_pair(nullptr, "");
-  std::string path(mkstemp_template, length);
+  std::string path(mkstemp_template_prefix + ".XXXXXX");
   int fd = mkstemp(path.data());
   FILE *fp = fdopen(fd, "wb");
   return std::make_pair(fp, path);
+}
+
+inline std::string MakeTmpDir(const std::string &mkdtemp_template_prefix) {
+  if (mkdtemp_template_prefix.empty())
+    return "";
+  std::string dir(mkdtemp_template_prefix + ".XXXXXX");
+  if (mkdtemp(dir.data())) return dir;
+  return "";
 }
 
 inline absl::StatusOr<mio::mmap_source>
@@ -107,22 +132,28 @@ inline bool ConvertAndWriteUint64(std::ostream *os, SrcType src_val) {
 }
 
 template<typename OutputStreamType>
-bool WriteData(OutputStreamType *os, char *str, uint32_t size);
+bool WriteData(OutputStreamType *os, const char *str, uint64_t size);
 
 template<>
 inline bool
-WriteData<std::ostream>(std::ostream *os, char *str, uint32_t size) {
+WriteData<std::ostream>(std::ostream *os, const char *str, uint64_t size) {
   return static_cast<bool>(os->write(str, size));
 }
 
 template<>
-inline bool WriteData<FILE>(FILE *fp, char *str, uint32_t size) {
+inline bool
+WriteData<std::ofstream>(std::ofstream *ofs, const char *str, uint64_t size) {
+  return static_cast<bool>(ofs->write(str, size));
+}
+
+template<>
+inline bool WriteData<FILE>(FILE *fp, const char *str, uint64_t size) {
   return fwrite(str, 1, size, fp) == size;
 }
 
 template<typename ValueType, typename OutputStreamType>
 inline bool WriteInteger(OutputStreamType *os, ValueType val,
-                         uint32_t size = sizeof(ValueType)) {
+                         uint64_t size = sizeof(ValueType)) {
   static_assert(std::is_integral_v<ValueType>);
   DCHECK(size == sizeof(ValueType) ||
          (size < sizeof(ValueType) &&
@@ -133,32 +164,32 @@ inline bool WriteInteger(OutputStreamType *os, ValueType val,
 
 template<typename OutputStreamType>
 inline bool WriteUint32(OutputStreamType *os, uint32_t val,
-                        uint32_t size = sizeof(uint32_t)) {
+                        uint64_t size = sizeof(uint32_t)) {
   return WriteInteger<uint32_t, OutputStreamType>(os, val, size);
 }
 
 template<typename OutputStreamType>
 inline bool WriteUint64(OutputStreamType *os, uint64_t val,
-                        uint32_t size = sizeof(uint64_t)) {
+                        uint64_t size = sizeof(uint64_t)) {
   return WriteInteger<uint64_t, OutputStreamType>(os, val, size);
 }
 
 template<typename InputStreamType>
-bool ReadData(InputStreamType *is, char *str, uint32_t size);
+bool ReadData(InputStreamType *is, char *str, uint64_t size);
 
 template<>
-inline bool ReadData<std::istream>(std::istream *is, char *str, uint32_t size) {
+inline bool ReadData<std::istream>(std::istream *is, char *str, uint64_t size) {
   return static_cast<bool>(is->read(str, size));
 }
 
 template<>
 inline bool
-ReadData<std::ifstream>(std::ifstream *ifs, char *str, uint32_t size) {
+ReadData<std::ifstream>(std::ifstream *ifs, char *str, uint64_t size) {
   return static_cast<bool>(ifs->read(str, size));
 }
 
 template<>
-inline bool ReadData<FILE>(FILE *fp, char *str, uint32_t size) {
+inline bool ReadData<FILE>(FILE *fp, char *str, uint64_t size) {
   return fread(str, size, 1, fp) == size;
 }
 
