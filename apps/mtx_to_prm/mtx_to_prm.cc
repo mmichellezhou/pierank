@@ -33,17 +33,15 @@ int main(int argc, char **argv) {
   absl::Duration duration = absl::Now() - start_time;
   std::cout << "mtx_read_time: " << duration << std::endl;
 
-  const auto *mat_out = &mat;
   if (change_index_dim) {
     start_time = absl::Now();
-    auto mat_out_or = mat.ChangeIndexDim();
-    CHECK(mat_out_or.ok());
-    mat_out = mat_out_or->release();
+    CHECK_OK(mat.ChangeIndexDim(prm_file));
     duration = absl::Now() - start_time;
-    std::cout << "mtx_row_index_time: " << duration << std::endl;
+    std::cout << "index_and_prm_write_time: " << duration << std::endl;
+  } else {
+    start_time = absl::Now();
+    CHECK_OK(mat.WritePieRankMatrixFile(prm_file));
+    duration = absl::Now() - start_time;
+    std::cout << "prm_write_time: " << duration << std::endl;
   }
-  start_time = absl::Now();
-  CHECK_OK(mat_out->WritePieRankMatrixFile(prm_file));
-  duration = absl::Now() - start_time;
-  std::cout << "prm_write_time: " << duration << std::endl;
 }

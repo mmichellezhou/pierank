@@ -102,7 +102,10 @@ protected:
     std::string inverse_prm_file = PieRankMatrixPathAfterIndexChange(file_path);
     EXPECT_OK(mat_inverse0.ReadPieRankMatrixFile(inverse_prm_file));
 
-    auto mat_inverse_or = mat.ChangeIndexDim();
+    constexpr uint32_t kMaxThreads = 4;
+    constexpr uint64_t kMaxNnzPerRange = 32;
+    auto pool = std::make_shared<ThreadPool>(kMaxThreads);
+    auto mat_inverse_or = mat.ChangeIndexDim(pool, kMaxNnzPerRange);
     EXPECT_OK(mat_inverse_or);
     auto mat_inverse = std::move(mat_inverse_or).value();
     if (index_dim) CheckAsh219RowIndex(*mat_inverse);
@@ -113,8 +116,7 @@ protected:
     CHECK(!tmp_dir.empty());
     auto tmp_path = absl::StrCat(tmp_dir, kPathSeparator,
                                  FileNameInPath(inverse_prm_file));
-    auto mat_inverse_mmap_or = mat.ChangeIndexDimByMmap(
-        tmp_path, /*max_nnz_per_range=*/32);
+    auto mat_inverse_mmap_or = mat.ChangeIndexDim(tmp_path, kMaxNnzPerRange);
     EXPECT_OK(mat_inverse_mmap_or);
     auto mat_inverse_mmap = std::move(mat_inverse_mmap_or).value();
     if (index_dim) CheckAsh219RowIndex(*mat_inverse_mmap);

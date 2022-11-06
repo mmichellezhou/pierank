@@ -92,6 +92,15 @@ public:
     max_val_ = std::max(max_val_, val);
   }
 
+  void Append(const FlexIndex<T> &other) {
+    DCHECK(vals_mmap_.empty());
+    DCHECK_EQ(item_size_, other.item_size_);
+    DCHECK_EQ(shift_by_min_val_, other.shift_by_min_val_);
+    min_val_ = std::min(min_val_, other.min_val_);
+    max_val_ = std::max(max_val_, other.max_val_);
+    vals_.append(other.vals_);
+  }
+
   inline const char *Data() const {
     return vals_mmap_.empty() ? vals_.data() : vals_mmap_.data();
   }
@@ -108,6 +117,11 @@ public:
       res += min_val_;
     DCHECK_LE(res, max_val_) << "idx: " << idx;
     return res;
+  }
+
+  void SetItemSize(uint32_t item_size) {
+    DCHECK_GT(item_size, 0);
+    item_size_ = item_size;
   }
 
   void SetItem(uint64_t idx, T value) {

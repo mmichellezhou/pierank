@@ -5,8 +5,10 @@
 #ifndef PIERANK_SPARSE_MATRIX_H_
 #define PIERANK_SPARSE_MATRIX_H_
 
+#include <algorithm>
 #include <cstdio>
 #include <limits>
+#include <numeric>
 #include <glog/logging.h>
 
 #include "absl/status/status.h"
@@ -16,6 +18,8 @@
 #include "absl/strings/strip.h"
 
 #include "pierank/flex_index.h"
+#include "pierank/math_utils.h"
+#include "pierank/thread_pool.h"
 #include "pierank/io/file_utils.h"
 #include "pierank/io/matrix_market_io.h"
 
@@ -101,6 +105,10 @@ public:
   using FlexPosType = FlexIndex<PosType>;
 
   using UniquePtr = std::unique_ptr<SparseMatrix<PosType, IdxType>>;
+
+  using UniqueIdxPtr = std::unique_ptr<FlexIdxType>;
+
+  using UniquePosPtr = std::unique_ptr<FlexPosType>;
 
   SparseMatrix() = default;
 
@@ -268,7 +276,7 @@ public:
       return {std::make_tuple(0, num_index_pos, range_nnz)};
     PosRanges res;
 
-    PosType range_size = (num_index_pos + num_ranges - 1) / num_ranges;
+    PosType range_size = UnsignedDivideCeil(num_index_pos, num_ranges);
     for (PosType first = 0; first < num_index_pos; first += range_size) {
       PosType last = std::min(first + range_size, num_index_pos);
       res.push_back(std::make_tuple(first, last, range_nnz));
@@ -289,8 +297,8 @@ public:
     if (num_ranges == 1)
       return {std::make_tuple(0, num_index_pos, nnz)};
     PosRanges res;
-    IdxType max_nnz_per_range = (nnz + num_ranges - 1) / num_ranges;
-    PosType avg_nnz_per_pos = (nnz + num_index_pos - 1) / num_index_pos;
+    IdxType max_nnz_per_range = UnsignedDivideCeil(nnz, num_ranges);
+    PosType avg_nnz_per_pos = UnsignedDivideCeil(nnz, num_index_pos);
     PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
     pos_step_size = std::min(pos_step_size, num_index_pos);
     pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
@@ -333,145 +341,165 @@ public:
     return SplitIndexDimByNnz(index_, nnz_, num_ranges);
   }
 
-  absl::StatusOr<UniquePtr> ChangeIndexDim(uint32_t num_ranges = 1) const {
-    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
-    res->rows_ = rows_;
-    res->cols_ = cols_;
-    res->nnz_ = nnz_;
-    res->index_dim_ = index_dim_ ? 0 : 1;
+  uint32_t
+  NumRanges(uint64_t max_nnz_per_range,
+            uint32_t max_ranges = std::numeric_limits<uint32_t>::max()) const {
+    return std::min(
+        static_cast<uint32_t>(UnsignedDivideCeil(nnz_, max_nnz_per_range)),
+        max_ranges);
+  }
 
-    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
-    FlexPosType nbr(pos_.ItemSize(), new_index_dim_size);
-    auto index_pos_end = IndexPosEnd();
+  uint32_t NumRanges(uint64_t max_nnz_per_range,
+                     std::shared_ptr<ThreadPool> pool) const {
+    return NumRanges(max_nnz_per_range, pool ? pool->Size() : 1);
+  }
+
+  // Counts the # of neighbors for each pos in non-index dim
+  UniquePosPtr CountNonIndexDimNeighbors() const {
+    PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
+    auto res = std::make_unique<FlexPosType>(pos_.ItemSize(),
+                                             non_index_dim_size);
+    auto index_pos_end = this->IndexPosEnd();
     for (PosType p = 0; p < index_pos_end; ++p) {
       for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
-        nbr.IncItem(pos_[i]);
-    }
-
-    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
-    CHECK(!idx_shift_by_min_val) << "Not yet supported";
-    FlexIdxType idx(idx_item_size);
-    IdxType nnz = 0;
-    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
-      idx.Append(nnz);
-      nnz += nbr[p];
-    }
-    DCHECK_EQ(nnz, nnz_);
-    if (idx[idx.NumItems() - 1] != nnz)
-      idx.Append(nnz);
-    auto ranges = SplitIndexDimByNnz(idx, nnz, num_ranges);
-    // std::cout << PosRangesDebugString(ranges);
-
-    nbr.Reset();
-    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
-    CHECK(!pos_shift_by_min_val) << "Not yet supported";
-    nnz = 0;
-
-    for (uint32_t r = 0; r < num_ranges; ++r) {
-      FlexPosType pos(pos_item_size, std::get<2>(ranges[r]));
-      IdxType range_nnz = 0;
-      auto [min_pos, max_pos, size] = ranges[r];
-      for (PosType p = 0; p < index_pos_end; ++p) {
-        for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
-          auto pos_i = pos_[i];
-          if (pos_i >= min_pos && pos_i < max_pos) {
-            pos.SetItem(idx[pos_i] + nbr[pos_i] - nnz, p);
-            nbr.IncItem(pos_i);
-            ++range_nnz;
-          }
-        }
-      }
-      nnz += range_nnz;
-      if (num_ranges == 1)
-        res->pos_ = std::move(pos);
-      else {
-        CHECK(false) << "Not yet supported";
-      }
-    }
-    DCHECK_EQ(nnz, nnz_);
-
-    res->index_ = std::move(idx);
-    if (num_ranges > 1) {
-      CHECK(false) << "Not yet supported";
+        res->IncItem(pos_[i]);
     }
 
     return res;
   }
 
-  // Returns a memory-mapped SparseMatrix with its index dim changed.
-  absl::StatusOr<UniquePtr> ChangeIndexDimByMmap(
-      const std::string &path,
-      uint64_t max_nnz_per_range = std::numeric_limits<uint32_t>::max()) const {
+  UniqueIdxPtr CreateReverseIndex(const FlexPosType &nbr) const {
+    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
+    CHECK(!idx_shift_by_min_val) << "Not yet supported";
+    auto res = std::make_unique<FlexIdxType>(idx_item_size);
+    IdxType nnz = 0;
+    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
+    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
+      res->Append(nnz);
+      nnz += nbr[p];
+    }
+    DCHECK_EQ(nnz, nnz_);
+    if ((*res)[res->NumItems() - 1] != nnz)
+      res->Append(nnz);
+
+    return res;
+  }
+
+  std::vector<IdxType> RangeNnzOffsets(const PosRanges &ranges) const {
+    std::vector<IdxType> res;
+    std::transform_exclusive_scan(
+        ranges.begin(), ranges.end(),
+        std::back_inserter(res), 0, std::plus<IdxType>{},
+        [](const PosRange &range) { return std::get<2>(range); });
+    return res;
+  }
+
+  UniquePosPtr ReversePosInRange(const PosRanges &ranges,
+                                 const std::vector<IdxType> &offsets,
+                                 uint32_t range_id,
+                                 const FlexIdxType &idx,
+                                 FlexPosType *nbr) const {
+    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
+    CHECK(!pos_shift_by_min_val) << "Not yet supported";
+
+    auto [min_pos, max_pos, range_size] = ranges[range_id];
+    auto offset = offsets[range_id];
+    auto res = std::make_unique<FlexPosType>(pos_item_size, range_size);
+    auto index_pos_end = IndexPosEnd();
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
+        auto pos_i = pos_[i];
+        if (pos_i >= min_pos && pos_i < max_pos) {
+          res->SetItem(idx[pos_i] + (*nbr)[pos_i] - offset, p);
+          nbr->IncItem(pos_i);
+        }
+      }
+    }
+    return res;
+  }
+
+  absl::StatusOr<UniquePtr>
+  ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
+                 uint64_t max_nnz_per_range = 8000000) const {
     auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
     res->rows_ = rows_;
     res->cols_ = cols_;
     res->nnz_ = nnz_;
     res->index_dim_ = index_dim_ ? 0 : 1;
 
-    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
-    FlexPosType nbr(pos_.ItemSize(), new_index_dim_size);
-    auto index_pos_end = IndexPosEnd();
-    for (PosType p = 0; p < index_pos_end; ++p) {
-      for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
-        nbr.IncItem(pos_[i]);
-    }
-
-    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
-    CHECK(!idx_shift_by_min_val) << "Not yet supported";
-    FlexIdxType idx(idx_item_size);
-    IdxType nnz = 0;
-    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
-      idx.Append(nnz);
-      nnz += nbr[p];
-    }
-    DCHECK_EQ(nnz, nnz_);
-    if (idx[idx.NumItems() - 1] != nnz)
-      idx.Append(nnz);
-    uint32_t num_ranges = (nnz + max_nnz_per_range - 1) / max_nnz_per_range;
-    auto ranges = SplitIndexDimByNnz(idx, nnz, num_ranges);
+    auto nbr = CountNonIndexDimNeighbors();
+    auto idx = CreateReverseIndex(*nbr);
+    uint32_t num_ranges = NumRanges(max_nnz_per_range, pool);
+    auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
     // std::cout << PosRangesDebugString(ranges);
 
-    nbr.Reset();
-    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
-    CHECK(!pos_shift_by_min_val) << "Not yet supported";
-    nnz = 0;
+    auto offsets = RangeNnzOffsets(ranges);
+    std::vector<UniquePosPtr> poses(num_ranges);
+    nbr->Reset();
+    if (num_ranges == 1) {
+      auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nbr.get());
+      res->pos_ = std::move(*pos.release());
+    } else {
+      DCHECK_NOTNULL(pool);
+      pool->ParallelFor(
+          ranges.size(), /*items_per_thread=*/1,
+          [&, this](uint64_t first, uint64_t last) {
+            for (auto r = first; r < last; ++r) {
+              auto pos = ReversePosInRange(ranges, offsets, r, *idx, nbr.get());
+              poses[r] = std::move(pos);
+            }
+          });
+      res->pos_.SetItemSize(poses.front()->ItemSize());
+      for (auto &pos : poses) {
+        res->pos_.Append(*pos);
+        pos.reset();
+      }
+    }
+    res->index_ = std::move(*idx.release());
+    return res;
+  }
 
+  // Returns a memory-mapped SparseMatrix with its index dim changed.
+  absl::StatusOr<UniquePtr> ChangeIndexDim(
+      const std::string &path,
+      uint64_t max_nnz_per_range = 64000000) const {
+    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
+    res->rows_ = rows_;
+    res->cols_ = cols_;
+    res->nnz_ = nnz_;
+    res->index_dim_ = index_dim_ ? 0 : 1;
+
+    auto nbr = CountNonIndexDimNeighbors();
+    auto idx = CreateReverseIndex(*nbr);
+    uint32_t num_ranges = NumRanges(max_nnz_per_range);
+    auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
+    // std::cout << PosRangesDebugString(ranges);
+
+    auto offsets = RangeNnzOffsets(ranges);
     // <num_items, file_path> for each range's pos FlexIndex
     std::vector<std::pair<uint64_t, std::string>> pos_items_and_paths;
+    nbr->Reset();
     for (uint32_t r = 0; r < num_ranges; ++r) {
-      FlexPosType pos(pos_item_size, std::get<2>(ranges[r]));
-      IdxType range_nnz = 0;
-      auto [min_pos, max_pos, size] = ranges[r];
-      for (PosType p = 0; p < index_pos_end; ++p) {
-        for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
-          auto pos_i = pos_[i];
-          if (pos_i >= min_pos && pos_i < max_pos) {
-            pos.SetItem(idx[pos_i] + nbr[pos_i] - nnz, p);
-            nbr.IncItem(pos_i);
-            ++range_nnz;
-          }
-        }
-      }
-      nnz += range_nnz;
+      auto pos = ReversePosInRange(ranges, offsets, r, *idx, nbr.get());
       auto[fp, tmp_path] = OpenTmpFile(path);
       DCHECK_NOTNULL(fp);
-      pos_items_and_paths.push_back(std::make_pair(pos.NumItems(), tmp_path));
+      pos_items_and_paths.push_back(std::make_pair(pos->NumItems(), tmp_path));
       // TODO: Support shift_by_min_value
-      if (!pos.WriteValues(fp, pos_item_size, /*shift_by_min_val=*/false))
+      if (!pos->WriteValues(fp, pos->ItemSize(), /*shift_by_min_val=*/false))
         return absl::InternalError("Error write file: " + tmp_path);
       fclose(fp);
     }
-    DCHECK_EQ(nnz, nnz_);
 
     DCHECK_EQ(pos_items_and_paths.size(), num_ranges);
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
     auto ofs = std::move(file_or).value();
-    res->index_ = std::move(idx);
+    res->index_ = std::move(*idx.release());
     res->WriteAllButPos(&ofs);
-    res->pos_.SetMinMaxValues(0, index_pos_end - 1);
+    res->pos_.SetMinMaxValues(0, IndexPosEnd() - 1);
+    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
     res->pos_.WriteAllButValues(&ofs, pos_item_size, /*shift_by_min=*/false);
-    if (!WriteUint64(&ofs, pos_item_size * nnz))
+    if (!WriteUint64(&ofs, pos_item_size * nnz_))
       return absl::InternalError("Error write file: " + path);
     for (const auto &pos_items_and_path : pos_items_and_paths) {
       auto[pos_items, pos_path] = pos_items_and_path;
