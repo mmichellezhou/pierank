@@ -387,10 +387,14 @@ public:
 
   std::vector<IdxType> RangeNnzOffsets(const PosRanges &ranges) const {
     std::vector<IdxType> res;
-    std::transform_exclusive_scan(
-        ranges.begin(), ranges.end(),
-        std::back_inserter(res), 0, std::plus<IdxType>{},
-        [](const PosRange &range) { return std::get<2>(range); });
+    // std::transform_exclusive_scan(
+    //    ranges.begin(), ranges.end(),
+    //    std::back_inserter(res), 0, std::plus<IdxType>{},
+    //    [](const PosRange &range) { return std::get<2>(range); });
+    res.push_back(0);
+    for (std::size_t i = 0; i < ranges.size() - 1; ++i)
+      res.push_back(res.back() + std::get<2>(ranges[i]));
+
     return res;
   }
 
