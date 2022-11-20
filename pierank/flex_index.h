@@ -119,6 +119,15 @@ public:
     return res;
   }
 
+  bool IsCompressed() const { return item_size_ < sizeof(T); }
+
+  T At(uint64_t idx) const {
+    DCHECK(!IsCompressed());
+    return vals_mmap_.empty()
+           ? reinterpret_cast<const T *>(vals_.data())[idx]
+           : reinterpret_cast<const T *>(vals_mmap_.data())[idx];
+  }
+
   void SetItemSize(uint32_t item_size) {
     DCHECK_GT(item_size, 0);
     item_size_ = item_size;
