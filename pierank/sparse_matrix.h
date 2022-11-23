@@ -358,8 +358,8 @@ public:
     return NumRanges(max_nnz_per_range, pool ? pool->Size() : 1);
   }
 
-  // Counts the # of neighbors for each pos in non-index dim
-  UniquePosPtr CountNonIndexDimNeighbors() const {
+  // Counts the # of non-zeros (nnz) for each pos in non-index dim
+  UniquePosPtr CountNonIndexDimNnz() const {
     PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
     auto res = std::make_unique<FlexPosType>(pos_.ItemSize(),
                                              non_index_dim_size);
@@ -407,13 +407,12 @@ public:
                                  uint32_t range_id,
                                  const FlexIdxType &idx,
                                  FlexPosType *nbr) const {
-    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
-    CHECK(!pos_shift_by_min_val) << "Not yet supported";
-
     auto [min_pos, max_pos, range_size] = ranges[range_id];
     auto offset = offsets[range_id];
-    auto res = std::make_unique<FlexPosType>(pos_item_size, range_size);
     auto index_pos_end = IndexPosEnd();
+    uint32_t pos_item_size = MinEncodeSize(index_pos_end);
+    auto res = std::make_unique<FlexPosType>(pos_item_size, range_size);
+
     for (PosType p = 0; p < index_pos_end; ++p) {
       for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
         auto pos_i = pos_[i];
@@ -435,17 +434,17 @@ public:
     res->nnz_ = nnz_;
     res->index_dim_ = index_dim_ ? 0 : 1;
 
-    auto nbr = CountNonIndexDimNeighbors();
-    auto idx = CreateReverseIndex(*nbr);
+    auto nnz = CountNonIndexDimNnz();
+    auto idx = CreateReverseIndex(*nnz);
     uint32_t num_ranges = NumRanges(max_nnz_per_range, pool);
     auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
     std::vector<UniquePosPtr> poses(num_ranges);
-    nbr->Reset();
+    nnz->Reset();
     if (num_ranges == 1) {
-      auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nbr.get());
+      auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nnz.get());
       res->pos_ = std::move(*pos.release());
     } else {
       DCHECK_NOTNULL(pool);
@@ -453,7 +452,7 @@ public:
           ranges.size(), /*items_per_thread=*/1,
           [&, this](uint64_t first, uint64_t last) {
             for (auto r = first; r < last; ++r) {
-              auto pos = ReversePosInRange(ranges, offsets, r, *idx, nbr.get());
+              auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
               poses[r] = std::move(pos);
             }
           });
@@ -477,8 +476,8 @@ public:
     res->nnz_ = nnz_;
     res->index_dim_ = index_dim_ ? 0 : 1;
 
-    auto nbr = CountNonIndexDimNeighbors();
-    auto idx = CreateReverseIndex(*nbr);
+    auto nnz = CountNonIndexDimNnz();
+    auto idx = CreateReverseIndex(*nnz);
     uint32_t num_ranges = NumRanges(max_nnz_per_range);
     auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
     // std::cout << PosRangesDebugString(ranges);
@@ -486,9 +485,9 @@ public:
     auto offsets = RangeNnzOffsets(ranges);
     // <num_items, file_path> for each range's pos FlexIndex
     std::vector<std::pair<uint64_t, std::string>> pos_items_and_paths;
-    nbr->Reset();
+    nnz->Reset();
     for (uint32_t r = 0; r < num_ranges; ++r) {
-      auto pos = ReversePosInRange(ranges, offsets, r, *idx, nbr.get());
+      auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
       auto[fp, tmp_path] = OpenTmpFile(path);
       DCHECK_NOTNULL(fp);
       pos_items_and_paths.push_back(std::make_pair(pos->NumItems(), tmp_path));

@@ -19,6 +19,7 @@
 #include "absl/strings/string_view.h"
 
 #include "pierank/io/file_utils.h"
+#include "pierank/math_utils.h"
 
 namespace pierank {
 
@@ -48,17 +49,6 @@ namespace pierank {
 template<typename T>
 class FlexIndex {
 public:
-  static uint32_t MinEncodeSize(uint64_t max_value) {
-    if (max_value <= 0xFF) return 1;
-    else if (max_value <= 0xFFFF) return 2;
-    else if (max_value <= 0xFFFFFF) return 3;
-    else if (max_value <= 0xFFFFFFFF) return 4;
-    else if (max_value <= 0xFFFFFFFFFF) return 5;
-    else if (max_value <= 0xFFFFFFFFFFFF) return 6;
-    else if (max_value <= 0xFFFFFFFFFFFFFF) return 7;
-    else return 8;
-  }
-
   static std::pair<uint32_t, bool> MinEncode(T max_val, T min_val = 0) {
     uint32_t encode_size_without_shift = MinEncodeSize(max_val);
     uint32_t encode_size_with_shift = MinEncodeSize(max_val - min_val);

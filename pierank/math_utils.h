@@ -22,6 +22,17 @@ inline T1 UnsignedDivideCeil(const T1 numerator, const T2 denominator) {
   return 1 + (numerator - 1) / denominator;;
 }
 
+inline uint32_t MinEncodeSize(uint64_t max_value) {
+  if (max_value <= 0xFF) return 1;
+  else if (max_value <= 0xFFFF) return 2;
+  else if (max_value <= 0xFFFFFF) return 3;
+  else if (max_value <= 0xFFFFFFFF) return 4;
+  else if (max_value <= 0xFFFFFFFFFF) return 5;
+  else if (max_value <= 0xFFFFFFFFFFFF) return 6;
+  else if (max_value <= 0xFFFFFFFFFFFFFF) return 7;
+  else return 8;
+}
+
 }  // namespace pierank
 
 #endif //PIERANK_MATH_UTILS_H_
