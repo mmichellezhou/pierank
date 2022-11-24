@@ -22,21 +22,19 @@ ABSL_FLAG(double, tolerance, 1E-06, "Error tolerance to check for convergence");
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
 
-  absl::Time start_time = absl::Now();
+  pierank::Timer timer(absl::Now());
   pierank::PageRank pr(absl::GetFlag(FLAGS_matrix_file),
                        absl::GetFlag(FLAGS_mmap_prm_file),
                        absl::GetFlag(FLAGS_damping_factor),
                        absl::GetFlag(FLAGS_max_iterations),
                        absl::GetFlag(FLAGS_tolerance));
-  absl::Duration duration = absl::Now() - start_time;
-  std::cout << "matrix_read_time=" << duration << "\n";
+  std::cout << "matrix_read_time_ms: " << timer.Stop() << "\n";
 
-  start_time = absl::Now();
+  timer.Restart();
   auto pool =
       std::make_shared<pierank::ThreadPool>(absl::GetFlag(FLAGS_max_threads));
   auto [epsilon, iterations] = pr.Run(pool);
-  duration = absl::Now() - start_time;
-  std::cout << "pagerank_time: " << duration << std::endl;
+  std::cout << "pagerank_time_ms: " << timer.Stop() << std::endl;
   std::cout << "epsilon: " << epsilon << std::endl;
   std::cout << "iterations: " << iterations << std::endl;
   auto page_scores = pr.TopK(absl::GetFlag(FLAGS_print_top_k));

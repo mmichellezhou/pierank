@@ -5,6 +5,7 @@
 #include "pierank/macros.h"
 #include "pierank/sparse_matrix.h"
 #include "pierank/thread_pool.h"
+#include "pierank/time_utils.h"
 
 #include "pierank/io/file_utils.h"
 #include "pierank/io/matrix_market_io.h"

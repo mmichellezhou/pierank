@@ -28,20 +28,16 @@ int main(int argc, char **argv) {
   CHECK(!prm_file.empty()) << "Bad .mtx file: " << mtx_file;
   std::cout << "prm_file: " << prm_file << std::endl;
 
-  absl::Time start_time = absl::Now();
+  pierank::Timer timer(absl::Now());
   CHECK_OK(mat.ReadMatrixMarketFile(mtx_file));
-  absl::Duration duration = absl::Now() - start_time;
-  std::cout << "mtx_read_time: " << duration << std::endl;
+  std::cout << "mtx_read_time_ms: " << timer.Stop() << std::endl;
 
+  timer.Restart();
   if (change_index_dim) {
-    start_time = absl::Now();
     CHECK_OK(mat.ChangeIndexDim(prm_file));
-    duration = absl::Now() - start_time;
-    std::cout << "index_and_prm_write_time: " << duration << std::endl;
+    std::cout << "index_and_prm_write_time_ms: " << timer.Stop() << std::endl;
   } else {
-    start_time = absl::Now();
     CHECK_OK(mat.WritePieRankMatrixFile(prm_file));
-    duration = absl::Now() - start_time;
-    std::cout << "prm_write_time: " << duration << std::endl;
+    std::cout << "prm_write_time_ms: " << timer.Stop() << std::endl;
   }
 }
