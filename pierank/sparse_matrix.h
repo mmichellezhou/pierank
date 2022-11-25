@@ -501,7 +501,7 @@ public:
       fclose(fp);
     }
     DCHECK_GE(pos_min, 0);
-    DCHECK_LE(pos_max, IndexPosEnd() - 1);
+    DCHECK_LT(pos_max, res->index_dim_ ? res->rows_ : res->cols_);
     DCHECK_EQ(pos_items_and_paths.size(), num_ranges);
 
     auto file_or = OpenWriteFile(path);
@@ -510,8 +510,10 @@ public:
     res->index_ = std::move(*idx.release());
     res->WriteAllButPos(&ofs);
     res->pos_.SetMinMaxValues(pos_min, pos_max);
-    auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
-    res->pos_.WriteAllButValues(&ofs, pos_item_size, /*shift_by_min=*/false);
+    auto[pos_item_size, pos_shift_by_min_val] = FlexPosType::MinEncode(pos_max,
+                                                                       pos_min);
+    CHECK(!pos_shift_by_min_val) << "Not yet supported";
+    res->pos_.WriteAllButValues(&ofs, pos_item_size, pos_shift_by_min_val);
     if (!WriteUint64(&ofs, pos_item_size * nnz_))
       return absl::InternalError("Error write file: " + path);
     for (const auto &pos_items_and_path : pos_items_and_paths) {
