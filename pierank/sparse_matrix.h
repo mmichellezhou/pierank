@@ -427,7 +427,7 @@ public:
 
   absl::StatusOr<UniquePtr>
   ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
-                 uint64_t max_nnz_per_range = 8000000) const {
+                 uint64_t max_nnz_per_thread = 8000000) const {
     auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
     res->rows_ = rows_;
     res->cols_ = cols_;
@@ -436,7 +436,7 @@ public:
 
     auto nnz = CountNonIndexDimNnz();
     auto idx = CreateReverseIndex(*nnz);
-    uint32_t num_ranges = NumRanges(max_nnz_per_range, pool);
+    uint32_t num_ranges = NumRanges(max_nnz_per_thread, pool);
     auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
     // std::cout << PosRangesDebugString(ranges);
 
@@ -486,8 +486,12 @@ public:
     // <num_items, file_path> for each range's pos FlexIndex
     std::vector<std::pair<uint64_t, std::string>> pos_items_and_paths;
     nnz->Reset();
+    auto pos_min = std::numeric_limits<PosType>::max();
+    auto pos_max = std::numeric_limits<PosType>::min();
     for (uint32_t r = 0; r < num_ranges; ++r) {
       auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
+      pos_min = std::min(pos_min, pos->MinValue());
+      pos_max = std::max(pos_max, pos->MaxValue());
       auto[fp, tmp_path] = OpenTmpFile(path);
       DCHECK_NOTNULL(fp);
       pos_items_and_paths.push_back(std::make_pair(pos->NumItems(), tmp_path));
@@ -496,14 +500,16 @@ public:
         return absl::InternalError("Error write file: " + tmp_path);
       fclose(fp);
     }
-
+    DCHECK_GE(pos_min, 0);
+    DCHECK_LE(pos_max, IndexPosEnd() - 1);
     DCHECK_EQ(pos_items_and_paths.size(), num_ranges);
+
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
     auto ofs = std::move(file_or).value();
     res->index_ = std::move(*idx.release());
     res->WriteAllButPos(&ofs);
-    res->pos_.SetMinMaxValues(0, IndexPosEnd() - 1);
+    res->pos_.SetMinMaxValues(pos_min, pos_max);
     auto [pos_item_size, pos_shift_by_min_val] = pos_.MinEncode();
     res->pos_.WriteAllButValues(&ofs, pos_item_size, /*shift_by_min=*/false);
     if (!WriteUint64(&ofs, pos_item_size * nnz_))

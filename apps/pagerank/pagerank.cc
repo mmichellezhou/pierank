@@ -12,8 +12,7 @@ ABSL_FLAG(double, damping_factor, 0.85, "Damping factor");
 ABSL_FLAG(std::string, matrix_file, "",
   "Input Matrix Market (.mtx) or PieRank Matrix (.prm) file");
 ABSL_FLAG(int32_t, max_iterations, 100, "Maximum number of iterations");
-ABSL_FLAG(uint32_t, max_threads, 16,
-  "Maximum number of concurrent threads (<= 256)");
+ABSL_FLAG(uint32_t, max_threads, 16, "Maximum number of concurrent threads");
 ABSL_FLAG(bool, mmap_prm_file, false, "Memory map .prm file");
 ABSL_FLAG(uint64_t, print_top_k, 10,
   "Print top-k pages with max PageRank scores or -1 to print all");

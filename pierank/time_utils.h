@@ -17,6 +17,7 @@ public:
 
   void Start() { start_time_ = absl::Now(); }
 
+  // Returns the cumulative elapsed time in milliseconds.
   double Stop() {
     elapsed_ += absl::Now() - start_time_;
     start_time_ = absl::Time();
