@@ -222,25 +222,26 @@ inline DestType ReadUint64AndConvert(InputStreamType *is,
 }
 
 template<typename ValueType, typename InputStreamType>
-inline ValueType ReadInteger(InputStreamType *is, uint64_t *offset = nullptr) {
+inline ValueType ReadInteger(InputStreamType *is,
+                             uint64_t size = sizeof(ValueType),
+                             uint64_t *offset = nullptr) {
   static_assert(std::is_integral_v<ValueType>);
-  ValueType val;
+  ValueType val = 0;
   if (offset)
-    *offset += sizeof(val);
-  if (ReadData<InputStreamType>(is, reinterpret_cast<char *>(&val),
-                                sizeof(val)))
+    *offset += size;
+  if (ReadData<InputStreamType>(is, reinterpret_cast<char *>(&val), size))
     return val;
   return std::numeric_limits<ValueType>::max();
 }
 
 template<typename InputStreamType>
 inline uint32_t ReadUint32(InputStreamType *is, uint64_t *offset = nullptr) {
-  return ReadInteger<uint32_t, InputStreamType>(is, offset);
+  return ReadInteger<uint32_t, InputStreamType>(is, sizeof(uint32_t), offset);
 }
 
 template<typename InputStreamType>
 inline uint64_t ReadUint64(InputStreamType *is, uint64_t *offset = nullptr) {
-  return ReadInteger<uint64_t, InputStreamType>(is, offset);
+  return ReadInteger<uint64_t, InputStreamType>(is, sizeof(uint64_t), offset);
 }
 
 template<typename InputStreamType>
@@ -262,21 +263,25 @@ inline bool Seek<FILE>(FILE *fp, uint64_t offset) {
 }
 
 template<typename ValueType, typename InputStreamType>
-inline ValueType ReadIntegerAtOffset(InputStreamType *is, uint64_t *offset) {
+inline ValueType ReadIntegerAtOffset(InputStreamType *is,
+                                     uint64_t *offset,
+                                     uint64_t size = sizeof(ValueType)) {
   DCHECK(offset);
   if (Seek<InputStreamType>(is, *offset))
-    return ReadInteger<ValueType, InputStreamType>(is, offset);
+    return ReadInteger<ValueType, InputStreamType>(is, size, offset);
   return std::numeric_limits<ValueType>::max();
 }
 
 template<typename InputStreamType>
 inline uint32_t ReadUint32AtOffset(InputStreamType *is, uint64_t *offset) {
-  return ReadIntegerAtOffset<uint32_t, InputStreamType>(is, offset);
+  return ReadIntegerAtOffset<uint32_t, InputStreamType>(is, offset,
+                                                        sizeof(uint32_t));
 }
 
 template<typename InputStreamType>
 inline uint64_t ReadUint64AtOffset(InputStreamType *is, uint64_t *offset) {
-  return ReadIntegerAtOffset<uint64_t, InputStreamType>(is, offset);
+  return ReadIntegerAtOffset<uint64_t, InputStreamType>(is, offset,
+                                                        sizeof(uint64_t));
 }
 
 template<typename InputStreamType>

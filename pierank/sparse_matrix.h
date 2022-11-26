@@ -483,8 +483,8 @@ public:
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
-    // <num_items, file_path> for each range's pos FlexIndex
-    std::vector<std::pair<uint64_t, std::string>> pos_items_and_paths;
+    // <num_items, item_size, file_path> for each range's pos FlexIndex
+    std::vector<std::tuple<uint64_t, uint32_t, std::string>> tmp_pos_infos;
     nnz->Reset();
     auto pos_min = std::numeric_limits<PosType>::max();
     auto pos_max = std::numeric_limits<PosType>::min();
@@ -494,15 +494,15 @@ public:
       pos_max = std::max(pos_max, pos->MaxValue());
       auto[fp, tmp_path] = OpenTmpFile(path);
       DCHECK_NOTNULL(fp);
-      pos_items_and_paths.push_back(std::make_pair(pos->NumItems(), tmp_path));
-      // TODO: Support shift_by_min_value
+      tmp_pos_infos.push_back(
+          std::make_tuple(pos->NumItems(), pos->ItemSize(), tmp_path));
       if (!pos->WriteValues(fp, pos->ItemSize(), /*shift_by_min_val=*/false))
         return absl::InternalError("Error write file: " + tmp_path);
       fclose(fp);
     }
     DCHECK_GE(pos_min, 0);
     DCHECK_LT(pos_max, res->index_dim_ ? res->rows_ : res->cols_);
-    DCHECK_EQ(pos_items_and_paths.size(), num_ranges);
+    DCHECK_EQ(tmp_pos_infos.size(), num_ranges);
 
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
@@ -512,19 +512,19 @@ public:
     res->pos_.SetMinMaxValues(pos_min, pos_max);
     auto[pos_item_size, pos_shift_by_min_val] = FlexPosType::MinEncode(pos_max,
                                                                        pos_min);
-    CHECK(!pos_shift_by_min_val) << "Not yet supported";
+    PosType pos_value_shift = pos_shift_by_min_val ? -pos_min : 0;
     res->pos_.WriteAllButValues(&ofs, pos_item_size, pos_shift_by_min_val);
     if (!WriteUint64(&ofs, pos_item_size * nnz_))
       return absl::InternalError("Error write file: " + path);
-    for (const auto &pos_items_and_path : pos_items_and_paths) {
-      auto[pos_items, pos_path] = pos_items_and_path;
-      auto tmp_file_or = OpenReadFile(pos_path);
+    for (const auto &tmp_pos_info : tmp_pos_infos) {
+      auto[tmp_pos_items, tmp_pos_item_size, tmp_pos_path] = tmp_pos_info;
+      auto tmp_file_or = OpenReadFile(tmp_pos_path);
       if (!tmp_file_or.ok()) return tmp_file_or.status();
-      FlexPosType pos(pos_item_size, pos_items);
-      pos.ReadValues(&*tmp_file_or);
-      DCHECK_EQ(pos.NumItems(), pos_items);
-      WriteData(&ofs, pos.Data(), pos_item_size * pos_items);
-      std::remove(pos_path.c_str());
+      FlexPosType pos(pos_item_size, tmp_pos_items);
+      pos.ReadValues(&*tmp_file_or, tmp_pos_item_size, pos_value_shift);
+      DCHECK_EQ(pos.NumItems(), tmp_pos_items);
+      WriteData(&ofs, pos.Data(), pos_item_size * tmp_pos_items);
+      std::remove(tmp_pos_path.c_str());
     }
     ofs.close();
 

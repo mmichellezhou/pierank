@@ -49,6 +49,8 @@ namespace pierank {
 template<typename T>
 class FlexIndex {
 public:
+  using SignedT = std::make_signed_t<T>;
+
   static std::pair<uint32_t, bool> MinEncode(T max_val, T min_val = 0) {
     uint32_t encode_size_without_shift = MinEncodeSize(max_val);
     uint32_t encode_size_with_shift = MinEncodeSize(max_val - min_val);
@@ -235,15 +237,26 @@ public:
   }
 
   template<typename InputStreamType>
-  bool ReadValues(InputStreamType *is, uint64_t *offset = nullptr) {
+  bool ReadValues(InputStreamType *is, uint32_t item_size,
+                  SignedT value_shift = 0) {
     auto size = ReadUint64(is);
     if (!*is) return false;
-    uint64_t new_size = offset ? size + *offset : size;
+    CHECK_EQ(size % item_size, 0);
+    uint64_t num_items = size / item_size;
+    uint64_t new_size = num_items * item_size_;
     if (vals_.size() < new_size)
       vals_.resize(new_size);
-    char *str = offset ? vals_.data() + *offset : vals_.data();
-    if (offset) *offset += size;
-    return ReadData<InputStreamType>(is, str, size);
+    if (value_shift == 0 && item_size == item_size_)
+      return ReadData<InputStreamType>(is, vals_.data(), size);
+
+    for (uint64_t i = 0; i < num_items; ++i) {
+      auto val = ReadInteger<T>(is, item_size);
+      DCHECK_LT(static_cast<int64_t>(val) + value_shift,
+                1ULL << item_size_ * 8);
+      val += value_shift;
+      SetItem(i, val);
+    }
+    return true;
   }
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
@@ -264,7 +277,7 @@ public:
     if (!is) return is;
     index.max_val_ = ReadUint64AndConvert<T>(&is);
     if (!is) return is;
-    index.ReadValues(&is);
+    index.ReadValues(&is, index.item_size_);
 
     return is;
   }
