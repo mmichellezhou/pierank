@@ -17,15 +17,23 @@ namespace pierank {
 
 class MatrixMarketIo {
 public:
+  enum class MatrixType {
+    kPatternNone,
+    kPatternGeneral,
+    kPatternSymmetric
+  };
+
   inline static bool HasMtxFileExtension(absl::string_view path) {
     return absl::EndsWith(path, ".mtx");
   }
 
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
-    ok_ = static_cast<bool>(is_) && CheckBanner();
-    if (ok_) {
-      SkipComments();
-      is_ >> rows_ >> cols_ >> nnz_;
+    if (static_cast<bool>(is_)) {
+      matrix_type_ = CheckBanner();
+      if (matrix_type_ != MatrixType::kPatternNone) {
+        SkipComments();
+        is_ >> rows_ >> cols_ >> nnz_;
+      }
     }
   }
 
@@ -41,16 +49,22 @@ public:
     }
   }
 
-  bool CheckBanner() {
+  MatrixType CheckBanner() {
     std::vector<std::string> words = {"%%MatrixMarket", "matrix", "coordinate",
-                                      "pattern", "general"};
+                                      "pattern"};
+    MatrixType res = MatrixType::kPatternNone;
+    std::string str;
     for (const auto &word : words) {
-      std::string temp;
-      is_ >> temp;
-      if (temp != word) return false;
+      is_ >> str;
+      if (str != word) return res;
     }
+    is_ >> str;
+    if (str == "general")
+      res = MatrixType::kPatternGeneral;
+    else if (str == "symmetric")
+      res = MatrixType::kPatternSymmetric;
     is_.ignore();  // skip the new line character
-    return true;
+    return res;
   }
 
   bool HasNext() const {
@@ -66,28 +80,24 @@ public:
     return ret;
   }
 
-  uint32_t Rows() const {
-    return rows_;
+  uint32_t Rows() const { return rows_; }
+
+  uint32_t Cols() const { return cols_; }
+
+  uint64_t NumNonZeros() const { return nnz_; }
+
+  bool Symmetric() const {
+    return matrix_type_ == MatrixType::kPatternSymmetric;
   }
 
-  uint32_t Cols() const {
-    return cols_;
-  }
-
-  uint64_t NumNonZeros() const {
-    return nnz_;
-  }
-
-  bool Ok() const {
-    return ok_;
-  }
+  bool Ok() const { return matrix_type_ != MatrixType::kPatternNone; }
 
 private:
   uint32_t rows_;
   uint32_t cols_;
   uint64_t nnz_;
   std::ifstream is_;
-  bool ok_;
+  MatrixType matrix_type_ = MatrixType::kPatternNone;
   uint64_t count_ = 0;
 };
 

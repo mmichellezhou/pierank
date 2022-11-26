@@ -145,6 +145,8 @@ public:
 
   PosType Cols() const { return cols_; }
 
+  bool Symmetric() const { return symmetric_; }
+
   uint32_t IndexDim() const { return index_dim_; }
 
   bool ok() const { return status_.ok(); }
@@ -156,6 +158,7 @@ public:
     if (lhs.rows_ != rhs.rows_) return false;
     if (lhs.cols_ != rhs.cols_) return false;
     if (lhs.nnz_ != rhs.nnz_) return false;
+    if (lhs.symmetric_ != rhs.symmetric_) return false;
     if (lhs.index_dim_ != rhs.index_dim_) return false;
     if (lhs.index_ != rhs.index_) return false;
     if (lhs.pos_ != rhs.pos_) return false;
@@ -167,6 +170,7 @@ public:
     ConvertAndWriteUint64(os, rows_);
     ConvertAndWriteUint64(os, cols_);
     ConvertAndWriteUint64(os, nnz_);
+    ConvertAndWriteUint32(os, symmetric_);
     WriteUint32(os, index_dim_);
     *os << index_;
   }
@@ -185,6 +189,7 @@ public:
       rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
       cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
+      symmetric_ = ReadUint32AndConvert<bool>(&is, &offset);
       index_dim_ = ReadUint32(&is, &offset);
       if (!is)
         status_.Update(absl::InternalError("Error read PRM file header"));
@@ -248,6 +253,7 @@ public:
 
     rows_ = mat.Rows();
     cols_ = mat.Cols();
+    symmetric_ = mat.Symmetric();
     index_dim_ = 1;  // Matrix Market file is column-major
     PosType prev_col = static_cast<PosType>(-1);
     while (mat.HasNext()) {
@@ -432,6 +438,7 @@ public:
     res->rows_ = rows_;
     res->cols_ = cols_;
     res->nnz_ = nnz_;
+    res->symmetric_ = symmetric_;
     res->index_dim_ = index_dim_ ? 0 : 1;
 
     auto nnz = CountNonIndexDimNnz();
@@ -542,6 +549,7 @@ public:
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
+    absl::StrAppend(&res, tab, "symmetric: ", symmetric_, "\n");
     absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
     indent += 2;
     absl::StrAppend(&res, tab, "index:\n",
@@ -572,6 +580,7 @@ private:
   PosType rows_ = 0;
   PosType cols_ = 0;
   IdxType nnz_ = 0;
+  bool symmetric_ = false;
   uint32_t index_dim_ = 0;
   FlexIdxType index_;
   FlexPosType pos_;
