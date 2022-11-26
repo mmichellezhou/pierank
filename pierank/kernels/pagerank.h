@@ -33,7 +33,7 @@ public:
   using PageScores = std::vector<PageScore>;
 
   PageRank(const std::string &file_path, bool mmap_prm_file = false,
-           T damping_factor = 0.85, uint32_t max_iterations = 30,
+           T damping_factor = 0.85, uint32_t max_iterations = 100,
            T epsilon = 1e-6) :
       damping_factor_(damping_factor), max_iterations_(max_iterations),
       epsilon_(epsilon) {
@@ -74,11 +74,11 @@ public:
               DoRange(ranges[r], /*range_id=*/r);
         });
       }
-      if (MaxEpsilon() < epsilon_)
+      if (SumEpsilons() < epsilon_)
         break;
     }
 
-    return std::make_pair(MaxEpsilon(), std::min(iter + 1, max_iterations_));
+    return std::make_pair(SumEpsilons(), std::min(iter + 1, max_iterations_));
   }
 
   // Returns an emtpy vector on error.
@@ -160,16 +160,16 @@ protected:
       }
 
       T score = one_minus_d_over_n_ + damping_factor_ * sum;
-      epsilon = std::max(epsilon, std::fabs(scores_[p] - score));
+      epsilon += std::fabs(scores_[p] - score);
       scores_[p] = score;
     }
 
     epsilons_[range_id] = epsilon;
   }
 
-  T MaxEpsilon() const {
+  T SumEpsilons() const {
     DCHECK(this->status_.ok());
-    return *std::max_element(epsilons_.begin(), epsilons_.end());
+    return std::accumulate(epsilons_.begin(), epsilons_.end(), 0.0);
   }
 
 private:

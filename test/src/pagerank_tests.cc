@@ -17,14 +17,14 @@ protected:
     PageRank pr0(file_path);
     CHECK(pr0.ok());
     auto[epsilon, num_iterations] = pr0.Run();
-    EXPECT_NEAR(epsilon, 7.39947e-05, 1e-06);
-    EXPECT_EQ(num_iterations, 30);
+    EXPECT_NEAR(epsilon, 9.82924e-07, 1e-06);
+    EXPECT_EQ(num_iterations, 52);
 
     PageRank pr1(file_path, /*mmap=*/false, /*df=*/0.85, /*max_iters=*/50);
     CHECK(pr1.ok());
     std::tie(epsilon, num_iterations) = pr1.Run();
     EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
-    EXPECT_EQ(num_iterations, 48);
+    EXPECT_EQ(num_iterations, 50);
 
     // std::vector<double> scores = pr.Scores();
     // std::cout << "\n";
@@ -40,7 +40,7 @@ protected:
     std::tie(epsilon, num_iterations) = pr4.Run(pool);
     if (mmap) pr4.UnMmap();
     EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
-    EXPECT_EQ(num_iterations, 48);
+    EXPECT_EQ(num_iterations, 50);
 
     auto page_scores = pr4.TopK(10);
     std::vector<uint32_t> top_pages = {0, 1, 7, 9, 2, 3, 6, 5, 8, 4};
