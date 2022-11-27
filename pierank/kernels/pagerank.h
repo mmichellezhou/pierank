@@ -146,17 +146,12 @@ protected:
     for (PosType p = first; p < last; ++p) {
       T sum = 0.0;
 
-      if (this->PosIsCompressed()) {
-        for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-          DCHECK_LT(i, this->NumNonZeros()) << p;
-          DCHECK_LT(this->Pos(i), this->Rows());
-          DCHECK_LT(this->Pos(i), scores_.size());
-          DCHECK_GT(out_degree_[this->Pos(i)], 0);
-          sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
-        }
-      } else {
-        for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i)
-          sum += scores_[this->PosAt(i)] / out_degree_[this->PosAt(i)];
+      for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
+        DCHECK_LT(i, this->NumNonZeros()) << p;
+        DCHECK_LT(this->Pos(i), this->Rows());
+        DCHECK_LT(this->Pos(i), scores_.size());
+        DCHECK_GT(out_degree_[this->Pos(i)], 0);
+        sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
       }
 
       T score = one_minus_d_over_n_ + damping_factor_ * sum;

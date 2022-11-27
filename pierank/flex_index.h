@@ -76,10 +76,16 @@ public:
 
   FlexIndex &operator=(FlexIndex &&) = default;
 
+  bool IsCompressed() const { return item_size_ < sizeof(T); }
+
   void Append(T val) {
+    DCHECK(vals_mmap_.empty());
     std::size_t old_size = vals_.size();
     vals_.resize(old_size + item_size_);
-    PRK_MEMCPY(&vals_[old_size], &val, item_size_);
+    if (item_size_ == sizeof(T))
+      *(reinterpret_cast<T *>(&vals_[old_size])) = val;
+    else
+      PRK_MEMCPY(&vals_[old_size], &val, item_size_);
     min_val_ = std::min(min_val_, val);
     max_val_ = std::max(max_val_, val);
   }
@@ -99,6 +105,11 @@ public:
 
   T operator[](uint64_t idx) const {
     DCHECK(vals_.empty() || vals_mmap_.empty());
+    if (item_size_ == sizeof(T)) {
+      return vals_mmap_.empty()
+             ? reinterpret_cast<const T *>(vals_.data())[idx]
+             : reinterpret_cast<const T *>(vals_mmap_.data())[idx];
+    }
     auto *ptr = Data();
     ptr += idx * item_size_;
 
@@ -111,15 +122,6 @@ public:
     return res;
   }
 
-  bool IsCompressed() const { return item_size_ < sizeof(T); }
-
-  T At(uint64_t idx) const {
-    DCHECK(!IsCompressed());
-    return vals_mmap_.empty()
-           ? reinterpret_cast<const T *>(vals_.data())[idx]
-           : reinterpret_cast<const T *>(vals_mmap_.data())[idx];
-  }
-
   void SetItemSize(uint32_t item_size) {
     DCHECK_GT(item_size, 0);
     item_size_ = item_size;
@@ -128,8 +130,12 @@ public:
   void SetItem(uint64_t idx, T value) {
     DCHECK(vals_mmap_.empty());
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
-    auto *ptr = vals_.data() + idx * item_size_;
-    PRK_MEMCPY(ptr, &value, item_size_);
+    if (item_size_ == sizeof(T))
+      reinterpret_cast<T *>(vals_.data())[idx] = value;
+    else {
+      auto *ptr = vals_.data() + idx * item_size_;
+      PRK_MEMCPY(ptr, &value, item_size_);
+    }
     min_val_ = std::min(min_val_, value);
     max_val_ = std::max(max_val_, value);
   }
@@ -139,10 +145,14 @@ public:
     DCHECK_GT(delta, 0);
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
     T res = 0;
-    auto ptr = vals_.data() + idx * item_size_;
-    PRK_MEMCPY(&res, ptr, item_size_);
-    res += delta;
-    PRK_MEMCPY(ptr, &res, item_size_);
+    if (item_size_ == sizeof(T))
+      reinterpret_cast<T *>(vals_.data())[idx] += delta;
+    else {
+      auto ptr = vals_.data() + idx * item_size_;
+      PRK_MEMCPY(&res, ptr, item_size_);
+      res += delta;
+      PRK_MEMCPY(ptr, &res, item_size_);
+    }
     max_val_ = std::max(max_val_, res);
     return res;
   }
