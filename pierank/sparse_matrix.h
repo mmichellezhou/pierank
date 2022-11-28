@@ -452,7 +452,7 @@ public:
       auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nnz.get());
       res->pos_ = std::move(*pos.release());
     } else {
-      DCHECK_NOTNULL(pool);
+      DCHECK(pool);
       pool->ParallelFor(
           ranges.size(), /*items_per_thread=*/1,
           [&, this](uint64_t first, uint64_t last) {
@@ -498,7 +498,7 @@ public:
       pos_min = std::min(pos_min, pos->MinValue());
       pos_max = std::max(pos_max, pos->MaxValue());
       auto[fp, tmp_path] = OpenTmpFile(path);
-      DCHECK_NOTNULL(fp);
+      DCHECK(fp);
       tmp_pos_infos.push_back(
           std::make_tuple(pos->NumItems(), pos->ItemSize(), tmp_path));
       if (!pos->WriteValues(fp, pos->ItemSize(), /*shift_by_min_val=*/false))
