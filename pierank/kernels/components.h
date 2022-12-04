@@ -5,6 +5,8 @@
 #ifndef PIERANK_KERNELS_COMPONENTS_H_
 #define PIERANK_KERNELS_COMPONENTS_H_
 
+#include <algorithm>
+
 #include "absl/status/status.h"
 #include "pierank/sparse_matrix.h"
 #include "pierank/thread_pool.h"
@@ -31,78 +33,151 @@ public:
     if (!this->status_.ok())
       return;
     num_nodes_ = std::max(this->Rows(), this->Cols());
-    labels_.resize(num_nodes_);
   }
 
   // Returns <num_iterations, converged> pair or <0, false> on error
-  std::tuple<uint32_t, bool> Run(std::shared_ptr <ThreadPool> pool = nullptr) {
-    CHECK_EQ(labels_.size(), num_nodes_);
+  std::tuple<uint32_t, bool> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
     if (!this->status_.ok())
       return std::make_pair(0, false);
 
     const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
-    num_propagations_.resize(ranges.size());
+    propagations_.resize(ranges.size());
+    labels_.resize(ranges.size());
+    for (auto &labels : labels_)
+      labels.resize(num_nodes_);
 
-    for (PosType n = 0; n < num_nodes_; ++n)
-      labels_[n] = n;
+    if (ranges.size() == 1) {
+      InitRanges(ranges, 0);
+    } else {
+      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                        [this, &ranges](uint64_t first, uint64_t last) {
+                          for (auto r = first; r < last; ++r)
+                            InitRanges(ranges, /*range_id=*/r);
+                        });
+    }
 
-    bool converged = false;
-    uint32_t iter;
-    for (iter = 0; iter < max_iterations_ && !converged; ++iter) {
-      if (!pool) {
-        DCHECK_EQ(ranges.size(), 1);
-        DoRange(ranges[0], 0);
+    while (!Stop()) {
+      if (ranges.size() == 1) {
+        UpdateRanges(ranges, 0);
+        ReconcileRanges(ranges, 0);
       } else {
+        DCHECK(pool);
         pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
                           [this, &ranges](uint64_t first, uint64_t last) {
                             for (auto r = first; r < last; ++r)
-                              DoRange(ranges[r], /*range_id=*/r);
+                              UpdateRanges(ranges, /*range_id=*/r);
+                          });
+        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                          [this, &ranges](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              ReconcileRanges(ranges, /*range_id=*/r);
                           });
       }
-      if (SumNumPropagations() == 0)
-        converged = true;
     }
-
-    return std::make_pair(std::min(iter + 1, max_iterations_), converged);
+    bool converged = (num_propagations_ == 0);
+    return std::make_pair(num_iterations_, converged);
   }
 
-  const std::vector<PosType> &Labels() const { return labels_; }
+  const std::vector<PosType> &Labels() const { return labels_[0]; }
+
+  PosType NumComponents() const {
+    auto labels = labels_[0];
+    std::sort(labels.begin(), labels.end());
+    auto it = std::unique(labels.begin(), labels.end());
+    return std::distance(labels.begin(), it);
+  }
 
 protected:
-  void DoRange(const PosRange &range, uint32_t range_id) {
+  void InitRanges(const PosRanges &ranges, uint32_t range_id) {
+    if (range_id == 0) {
+      num_iterations_ = 0;
+      num_propagations_ = std::numeric_limits<IdxType>::max();
+      std::fill(propagations_.begin(), propagations_.end(), num_propagations_);
+    }
+    DCHECK_LT(range_id, ranges.size());
+    auto &labels = labels_[range_id];
+    for (PosType n = 0; n < num_nodes_; ++n)
+      labels[n] = n;
+  }
+
+  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {
     DCHECK(this->status_.ok());
+    DCHECK_LT(range_id, ranges.size());
+    const auto &range = ranges[range_id];
     auto first = std::get<0>(range);
     auto last = std::get<1>(range);
     DCHECK_LT(first, last);
     last = std::min(last, this->IndexPosEnd());
 
     PosType num_props = 0;
+    auto &labels = labels_[range_id];
     for (PosType p = first; p < last; ++p) {
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        if (labels_[p] < labels_[i]) {
-          labels_[i] = labels_[p];
+        auto pos = this->Pos(i);
+        if (labels[p] < labels[pos]) {
+          labels[pos] = labels[p];
           ++num_props;
         }
-        else if (labels_[p] > labels_[i]) {
-          labels_[p] = labels_[i];
+        else if (labels[p] > labels[pos]) {
+          labels[p] = labels[pos];
           ++num_props;
         }
       }
     }
-
-    num_propagations_[range_id] = num_props;
+    CHECK(propagations_[range_id] || !num_props);
+    propagations_[range_id] = num_props;
   }
 
-  PosType SumNumPropagations() const {
+  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {
+    DCHECK_LT(range_id, ranges.size());
+    if (range_id == 0) {
+      ++num_iterations_;
+      num_propagations_ = std::accumulate(propagations_.begin(),
+                                          propagations_.end(), 0);
+    }
+    if (ranges.size() == 1) return;
+
+    const auto &range = ranges[range_id];
+    auto first = std::get<0>(range);
+    auto last = std::get<1>(range);
+    DCHECK_LT(first, last);
+    last = std::min(last, this->IndexPosEnd());
+
+    auto num_ranges = ranges.size();
+    auto &labels0 = labels_[0];
+    for (PosType p = first; p < last; ++p) {
+      PosType min_label = labels0[p];
+      uint32_t min_label_range = 0;
+      bool back_prop = false;
+      for (uint32_t r = 1; r < num_ranges; ++r) {
+        PosType label = labels_[r][p];
+        if (min_label > label) {
+          min_label = label;
+          back_prop = true;
+          min_label_range = r;
+        } else if (min_label < label)
+          labels_[r][p] = min_label;
+      }
+      for (uint32_t r = 0; back_prop && r < min_label_range; ++r)
+        labels_[r][p] = min_label;
+    }
+  }
+
+  IdxType NumPropagations() const {
     DCHECK(this->status_.ok());
-    return std::accumulate(num_propagations_.begin(), num_propagations_.end(),
-                           0);
+    return num_propagations_;
+  }
+
+  bool Stop() const {
+    return num_propagations_ == 0 || num_iterations_ >= max_iterations_;
   }
 
 private:
   uint64_t num_nodes_;
-  std::vector<PosType> labels_;
-  std::vector<PosType> num_propagations_;
+  std::vector<std::vector<PosType>> labels_;  // # labels per thread: num_nodes_
+  std::vector<IdxType> propagations_;
+  IdxType num_propagations_;
+  uint32_t num_iterations_;
   uint32_t max_iterations_;
 };
 

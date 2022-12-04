@@ -16,14 +16,14 @@ protected:
   void Run(const std::string &file_path) {
     PageRank pr0(file_path);
     CHECK(pr0.ok());
-    auto[epsilon, num_iterations] = pr0.Run();
-    EXPECT_NEAR(epsilon, 9.82924e-07, 1e-06);
+    auto[residual, num_iterations] = pr0.Run();
+    EXPECT_NEAR(residual, 9.82924e-07, 1e-06);
     EXPECT_EQ(num_iterations, 52);
 
     PageRank pr1(file_path, /*mmap=*/false, /*df=*/0.85, /*max_iters=*/50);
     CHECK(pr1.ok());
-    std::tie(epsilon, num_iterations) = pr1.Run();
-    EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
+    std::tie(residual, num_iterations) = pr1.Run();
+    EXPECT_NEAR(residual, 9.75642e-07, 1e-06);
     EXPECT_EQ(num_iterations, 50);
 
     // std::vector<double> scores = pr.Scores();
@@ -37,9 +37,9 @@ protected:
     CHECK(pr4.ok());
     constexpr uint32_t kMaxThreads = 4;
     auto pool = std::make_shared<ThreadPool>(kMaxThreads);
-    std::tie(epsilon, num_iterations) = pr4.Run(pool);
+    std::tie(residual, num_iterations) = pr4.Run(pool);
     if (mmap) pr4.UnMmap();
-    EXPECT_NEAR(epsilon, 9.75642e-07, 1e-06);
+    EXPECT_NEAR(residual, 9.75642e-07, 1e-06);
     EXPECT_EQ(num_iterations, 50);
 
     auto page_scores = pr4.TopK(10);

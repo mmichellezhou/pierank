@@ -34,9 +34,9 @@ public:
 
   PageRank(const std::string &file_path, bool mmap_prm_file = false,
            T damping_factor = 0.85, uint32_t max_iterations = 100,
-           T epsilon = 1e-6) :
+           T max_residual = 1e-6) :
       damping_factor_(damping_factor), max_iterations_(max_iterations),
-      epsilon_(epsilon) {
+      max_residual_(max_residual) {
     if (MatrixMarketIo::HasMtxFileExtension(file_path))
       this->status_ = this->ReadMatrixMarketFile(file_path);
     else if (mmap_prm_file)
@@ -48,37 +48,48 @@ public:
     CHECK_EQ(this->IndexDim(), 1);
     num_pages_ = std::max(this->Rows(), this->Cols());
     one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
-    scores_.resize(num_pages_, one_minus_d_over_n_);
     out_degree_.resize(this->Rows());
-
     NumOutboundLinks();
   }
 
-  // Returns <epsilon, num_iterations> pair or <+infinity, 0> on error
+  // Returns <residual, num_iterations> pair or <+infinity, 0> on error
   std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
     if (!this->status_.ok())
       return std::make_pair(std::numeric_limits<T>::max(), 0);
 
     const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
-    epsilons_.resize(ranges.size(), std::numeric_limits<T>::max());
+    residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
 
-    uint32_t iter;
-    for (iter = 0; iter < max_iterations_; ++iter) {
-      if (!pool) {
-        DCHECK_EQ(ranges.size(), 1);
-        DoRange(ranges[0], 0);
+    if (ranges.size() == 1) {
+      InitRanges(ranges, 0);
+    } else {
+      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                        [this, &ranges](uint64_t first, uint64_t last) {
+                          for (auto r = first; r < last; ++r)
+                            InitRanges(ranges, /*range_id=*/r);
+                        });
+    }
+
+    while (!Stop()) {
+      if (ranges.size() == 1) {
+        UpdateRanges(ranges, 0);
+        ReconcileRanges(ranges, 0);
       } else {
+        DCHECK(pool);
         pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
           [this, &ranges](uint64_t first, uint64_t last) {
             for (auto r = first; r < last; ++r)
-              DoRange(ranges[r], /*range_id=*/r);
+              UpdateRanges(ranges, /*range_id=*/r);
         });
+        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                          [this, &ranges](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              ReconcileRanges(ranges, /*range_id=*/r);
+                          });
       }
-      if (SumEpsilons() < epsilon_)
-        break;
     }
 
-    return std::make_pair(SumEpsilons(), std::min(iter + 1, max_iterations_));
+    return std::make_pair(residual_, num_iterations_);
   }
 
   // Returns an emtpy vector on error.
@@ -110,6 +121,8 @@ public:
     return page_scores;
   }
 
+  T Residual() const { return residual_; }
+
   const std::vector<T> &Scores() const { return scores_; }
 
 protected:
@@ -118,6 +131,58 @@ protected:
     for (PosType nz = 0; nz < this->NumNonZeros(); nz++) {
       out_degree_[this->Pos(nz)]++;
     }
+  }
+
+  void InitRanges(const PosRanges &ranges, uint32_t range_id) {
+    DCHECK_LT(range_id, ranges.size());
+    if (range_id == 0) {
+      num_iterations_ = 0;
+      residual_ = std::numeric_limits<T>::max();
+      std::fill(residuals_.begin(), residuals_.end(), residual_);
+      scores_.resize(num_pages_);
+      std::fill(scores_.begin(), scores_.end(), one_minus_d_over_n_);
+    }
+  }
+
+  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {
+    DCHECK(this->status_.ok());
+    DCHECK_LT(range_id, ranges.size());
+    const auto &range = ranges[range_id];
+    auto first = std::get<0>(range);
+    auto last = std::get<1>(range);
+    DCHECK_LT(first, last);
+    last = std::min(last, this->IndexPosEnd());
+
+    T residual = 0.0;
+    for (PosType p = first; p < last; ++p) {
+      T sum = 0.0;
+
+      for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
+        DCHECK_LT(i, this->NumNonZeros()) << p;
+        auto pos = this->Pos(i);
+        DCHECK_LT(pos, this->Rows());
+        DCHECK_LT(pos, scores_.size());
+        DCHECK_GT(out_degree_[pos], 0);
+        sum += scores_[pos] / out_degree_[pos];
+      }
+
+      T score = one_minus_d_over_n_ + damping_factor_ * sum;
+      residual += std::fabs(scores_[p] - score);
+      scores_[p] = score;
+    }
+
+    residuals_[range_id] = residual;
+  }
+
+  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {
+    if (range_id == 0) {
+      ++num_iterations_;
+      residual_ = std::accumulate(residuals_.begin(), residuals_.end(), 0.0);
+    }
+  }
+
+  bool Stop() const {
+    return residual_ <= max_residual_ || num_iterations_ >= max_iterations_;
   }
 
   void InitPageScores(
@@ -135,47 +200,17 @@ protected:
     }
   }
 
-  void DoRange(const PosRange &range, uint32_t range_id) {
-    DCHECK(this->status_.ok());
-    auto first = std::get<0>(range);
-    auto last = std::get<1>(range);
-    DCHECK_LT(first, last);
-    last = std::min(last, this->IndexPosEnd());
-
-    T epsilon = 0.0;
-    for (PosType p = first; p < last; ++p) {
-      T sum = 0.0;
-
-      for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        DCHECK_LT(i, this->NumNonZeros()) << p;
-        DCHECK_LT(this->Pos(i), this->Rows());
-        DCHECK_LT(this->Pos(i), scores_.size());
-        DCHECK_GT(out_degree_[this->Pos(i)], 0);
-        sum += scores_[this->Pos(i)] / out_degree_[this->Pos(i)];
-      }
-
-      T score = one_minus_d_over_n_ + damping_factor_ * sum;
-      epsilon += std::fabs(scores_[p] - score);
-      scores_[p] = score;
-    }
-
-    epsilons_[range_id] = epsilon;
-  }
-
-  T SumEpsilons() const {
-    DCHECK(this->status_.ok());
-    return std::accumulate(epsilons_.begin(), epsilons_.end(), 0.0);
-  }
-
 private:
   T damping_factor_;
   uint64_t num_pages_;
   T one_minus_d_over_n_;
   std::vector<T> scores_;
-  std::vector<T> epsilons_;
+  std::vector<T> residuals_;
   std::vector<uint32_t> out_degree_;
+  uint32_t num_iterations_;
   uint32_t max_iterations_;
-  T epsilon_;
+  T residual_;
+  T max_residual_;
 };
 
 }  // namespace pierank
