@@ -124,7 +124,6 @@ protected:
         }
       }
     }
-    CHECK(propagations_[range_id] || !num_props);
     propagations_[range_id] = num_props;
   }
 

@@ -311,8 +311,7 @@ public:
     pos_step_size = std::min(pos_step_size, num_index_pos);
     pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
     PosType first = 0;
-    while (res.size() < num_ranges - 1) {
-      DCHECK_LT(first, num_index_pos);
+    while ((res.size() < num_ranges - 1) && (first < num_index_pos)) {
       PosType last = first + 1;
       IdxType range_nnz = index[last] - index[first];
       if (range_nnz < max_nnz_per_range) {
@@ -332,10 +331,11 @@ public:
       res.push_back(std::make_tuple(first, last, range_nnz));
       first = last;
     }
-
-    res.push_back(std::make_tuple(first, num_index_pos,
-                                  index[num_index_pos] - index[first]));
-    DCHECK_EQ(res.size(), num_ranges);
+    if (first < num_index_pos) {
+      res.push_back(std::make_tuple(first, num_index_pos,
+                                    index[num_index_pos] - index[first]));
+      DCHECK_EQ(res.size(), num_ranges);
+    }
     return res;
   }
 
