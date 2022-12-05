@@ -54,41 +54,11 @@ public:
 
   // Returns <residual, num_iterations> pair or <+infinity, 0> on error
   std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
-    if (!this->status_.ok())
-      return std::make_pair(std::numeric_limits<T>::max(), 0);
-
     const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
     residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
 
-    if (ranges.size() == 1) {
-      InitRanges(ranges, 0);
-    } else {
-      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                        [this, &ranges](uint64_t first, uint64_t last) {
-                          for (auto r = first; r < last; ++r)
-                            InitRanges(ranges, /*range_id=*/r);
-                        });
-    }
-
-    while (!Stop()) {
-      if (ranges.size() == 1) {
-        UpdateRanges(ranges, 0);
-        ReconcileRanges(ranges, 0);
-      } else {
-        DCHECK(pool);
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-          [this, &ranges](uint64_t first, uint64_t last) {
-            for (auto r = first; r < last; ++r)
-              UpdateRanges(ranges, /*range_id=*/r);
-        });
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                          [this, &ranges](uint64_t first, uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              ReconcileRanges(ranges, /*range_id=*/r);
-                          });
-      }
-    }
-
+    if (!this->ProcessRanges(ranges, pool))
+      return std::make_pair(std::numeric_limits<T>::max(), 0);
     return std::make_pair(residual_, num_iterations_);
   }
 
@@ -133,7 +103,7 @@ protected:
     }
   }
 
-  void InitRanges(const PosRanges &ranges, uint32_t range_id) {
+  void InitRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK_LT(range_id, ranges.size());
     if (range_id == 0) {
       num_iterations_ = 0;
@@ -144,7 +114,7 @@ protected:
     }
   }
 
-  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {
+  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK(this->status_.ok());
     DCHECK_LT(range_id, ranges.size());
     const auto &range = ranges[range_id];
@@ -174,14 +144,14 @@ protected:
     residuals_[range_id] = residual;
   }
 
-  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {
+  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) override {
     if (range_id == 0) {
       ++num_iterations_;
       residual_ = std::accumulate(residuals_.begin(), residuals_.end(), 0.0);
     }
   }
 
-  bool Stop() const {
+  bool Stop() const override {
     return residual_ <= max_residual_ || num_iterations_ >= max_iterations_;
   }
 

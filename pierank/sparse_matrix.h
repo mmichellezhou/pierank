@@ -574,6 +574,49 @@ public:
 protected:
   absl::Status status_;
 
+  virtual void InitRanges(const PosRanges &ranges, uint32_t range_id) {}
+
+  virtual void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {}
+
+  virtual void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {}
+
+  virtual bool Stop() const { return true; }
+
+  bool ProcessRanges(const PosRanges &ranges,
+                     std::shared_ptr <ThreadPool> pool = nullptr) {
+    if (!this->status_.ok()) return false;
+
+    if (ranges.size() == 1) {
+      InitRanges(ranges, 0);
+    } else {
+      DCHECK(pool);
+      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                        [this, &ranges](uint64_t first, uint64_t last) {
+                          for (auto r = first; r < last; ++r)
+                            InitRanges(ranges, /*range_id=*/r);
+                        });
+    }
+
+    while (!Stop()) {
+      if (ranges.size() == 1) {
+        UpdateRanges(ranges, 0);
+        ReconcileRanges(ranges, 0);
+      } else {
+        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                          [this, &ranges](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              UpdateRanges(ranges, /*range_id=*/r);
+                          });
+        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                          [this, &ranges](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              ReconcileRanges(ranges, /*range_id=*/r);
+                          });
+      }
+    }
+    return true;
+  }
+
 private:
   PosType rows_ = 0;
   PosType cols_ = 0;

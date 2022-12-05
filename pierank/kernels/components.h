@@ -37,48 +37,24 @@ public:
 
   // Returns <num_iterations, converged> pair or <0, false> on error
   std::tuple<uint32_t, bool> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
-    if (!this->status_.ok())
-      return std::make_pair(0, false);
-
     const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
     propagations_.resize(ranges.size());
     labels_.resize(ranges.size());
     for (auto &labels : labels_)
       labels.resize(num_nodes_);
 
-    if (ranges.size() == 1) {
-      InitRanges(ranges, 0);
-    } else {
-      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                        [this, &ranges](uint64_t first, uint64_t last) {
-                          for (auto r = first; r < last; ++r)
-                            InitRanges(ranges, /*range_id=*/r);
-                        });
-    }
-
-    while (!Stop()) {
-      if (ranges.size() == 1) {
-        UpdateRanges(ranges, 0);
-        ReconcileRanges(ranges, 0);
-      } else {
-        DCHECK(pool);
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                          [this, &ranges](uint64_t first, uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              UpdateRanges(ranges, /*range_id=*/r);
-                          });
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                          [this, &ranges](uint64_t first, uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              ReconcileRanges(ranges, /*range_id=*/r);
-                          });
-      }
-    }
+    if (!this->ProcessRanges(ranges, pool))
+      return std::make_pair(0, false);
     bool converged = (num_propagations_ == 0);
     return std::make_pair(num_iterations_, converged);
   }
 
   const std::vector<PosType> &Labels() const { return labels_[0]; }
+
+  IdxType NumPropagations() const {
+    DCHECK(this->status_.ok());
+    return num_propagations_;
+  }
 
   PosType NumComponents() const {
     auto labels = labels_[0];
@@ -88,7 +64,7 @@ public:
   }
 
 protected:
-  void InitRanges(const PosRanges &ranges, uint32_t range_id) {
+  void InitRanges(const PosRanges &ranges, uint32_t range_id) override {
     if (range_id == 0) {
       num_iterations_ = 0;
       num_propagations_ = std::numeric_limits<IdxType>::max();
@@ -100,7 +76,7 @@ protected:
       labels[n] = n;
   }
 
-  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {
+  void UpdateRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK(this->status_.ok());
     DCHECK_LT(range_id, ranges.size());
     const auto &range = ranges[range_id];
@@ -127,7 +103,7 @@ protected:
     propagations_[range_id] = num_props;
   }
 
-  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {
+  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK_LT(range_id, ranges.size());
     if (range_id == 0) {
       ++num_iterations_;
@@ -162,12 +138,7 @@ protected:
     }
   }
 
-  IdxType NumPropagations() const {
-    DCHECK(this->status_.ok());
-    return num_propagations_;
-  }
-
-  bool Stop() const {
+  bool Stop() const override {
     return num_propagations_ == 0 || num_iterations_ >= max_iterations_;
   }
 
