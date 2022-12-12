@@ -98,8 +98,9 @@ public:
 protected:
   void NumOutboundLinks() {
     DCHECK(this->status_.ok());
-    for (PosType nz = 0; nz < this->NumNonZeros(); nz++) {
-      out_degree_[this->Pos(nz)]++;
+    auto nnz = this->NumNonZeros();
+    for (IdxType i = 0; i < nnz; ++i) {
+      ++out_degree_[this->Pos(i)];
     }
   }
 
