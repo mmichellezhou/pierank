@@ -285,9 +285,9 @@ public:
     PosRanges res;
 
     PosType range_size = UnsignedDivideCeil(num_index_pos, num_ranges);
-    for (PosType first = 0; first < num_index_pos; first += range_size) {
-      PosType last = std::min(first + range_size, num_index_pos);
-      res.push_back(std::make_tuple(first, last, range_nnz));
+    for (PosType min_pos = 0; min_pos < num_index_pos; min_pos += range_size) {
+      PosType max_pos = std::min(min_pos + range_size, num_index_pos);
+      res.push_back(std::make_tuple(min_pos, max_pos, range_nnz));
     }
 
     DCHECK_EQ(res.size(), num_ranges);
@@ -310,30 +310,30 @@ public:
     PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
     pos_step_size = std::min(pos_step_size, num_index_pos);
     pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
-    PosType first = 0;
-    while ((res.size() < num_ranges - 1) && (first < num_index_pos)) {
-      PosType last = first + 1;
-      IdxType range_nnz = index[last] - index[first];
+    PosType min_pos = 0;
+    while ((res.size() < num_ranges - 1) && (min_pos < num_index_pos)) {
+      PosType max_pos = min_pos + 1;
+      IdxType range_nnz = index[max_pos] - index[min_pos];
       if (range_nnz < max_nnz_per_range) {
         PosType step_size = pos_step_size;
-        while (step_size > 0 && last < num_index_pos) {
-          PosType new_last = std::min(last + step_size, num_index_pos);
-          IdxType step_nnz = index[new_last] - index[last];
+        while (step_size > 0 && max_pos < num_index_pos) {
+          PosType new_max_pos = std::min(max_pos + step_size, num_index_pos);
+          IdxType step_nnz = index[new_max_pos] - index[max_pos];
           if (range_nnz + step_nnz <= max_nnz_per_range) {
             range_nnz += step_nnz;
-            last = new_last;
+            max_pos = new_max_pos;
             if (step_size * 2 <= pos_step_size)
               step_size *= 2;
           } else
             step_size /= 2;
         }
       }
-      res.push_back(std::make_tuple(first, last, range_nnz));
-      first = last;
+      res.push_back(std::make_tuple(min_pos, max_pos, range_nnz));
+      min_pos = max_pos;
     }
-    if (first < num_index_pos) {
-      res.push_back(std::make_tuple(first, num_index_pos,
-                                    index[num_index_pos] - index[first]));
+    if (min_pos < num_index_pos) {
+      res.push_back(std::make_tuple(min_pos, num_index_pos,
+                                    index[num_index_pos] - index[min_pos]));
       DCHECK_EQ(res.size(), num_ranges);
     }
     return res;
@@ -581,6 +581,17 @@ protected:
   virtual void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {}
 
   virtual bool Stop() const { return true; }
+
+  std::pair<PosType, PosType>
+  RangeMinMaxPos(const PosRanges &ranges, uint32_t range_id) const {
+    DCHECK_LT(range_id, ranges.size());
+    const auto &range = ranges[range_id];
+    auto min_pos = std::get<0>(range);
+    auto max_pos = std::get<1>(range);
+    DCHECK_LT(min_pos, max_pos);
+    max_pos = std::min(max_pos, this->IndexPosEnd());
+    return std::make_pair(min_pos, max_pos);
+  }
 
   bool ProcessRanges(const PosRanges &ranges,
                      std::shared_ptr <ThreadPool> pool = nullptr) {

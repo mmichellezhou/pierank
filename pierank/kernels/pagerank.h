@@ -117,15 +117,9 @@ protected:
 
   void UpdateRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK(this->status_.ok());
-    DCHECK_LT(range_id, ranges.size());
-    const auto &range = ranges[range_id];
-    auto first = std::get<0>(range);
-    auto last = std::get<1>(range);
-    DCHECK_LT(first, last);
-    last = std::min(last, this->IndexPosEnd());
-
+    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T residual = 0.0;
-    for (PosType p = first; p < last; ++p) {
+    for (PosType p = min_pos; p < max_pos; ++p) {
       T sum = 0.0;
 
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {

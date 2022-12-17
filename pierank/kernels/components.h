@@ -78,16 +78,10 @@ protected:
 
   void UpdateRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK(this->status_.ok());
-    DCHECK_LT(range_id, ranges.size());
-    const auto &range = ranges[range_id];
-    auto first = std::get<0>(range);
-    auto last = std::get<1>(range);
-    DCHECK_LT(first, last);
-    last = std::min(last, this->IndexPosEnd());
-
     PosType num_props = 0;
     auto &labels = labels_[range_id];
-    for (PosType p = first; p < last; ++p) {
+    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    for (PosType p = min_pos; p < max_pos; ++p) {
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
         auto pos = this->Pos(i);
         if (labels[p] < labels[pos]) {
@@ -112,28 +106,21 @@ protected:
     }
     if (ranges.size() == 1) return;
 
-    const auto &range = ranges[range_id];
-    auto first = std::get<0>(range);
-    auto last = std::get<1>(range);
-    DCHECK_LT(first, last);
-    last = std::min(last, this->IndexPosEnd());
-
     auto num_ranges = ranges.size();
     auto &labels0 = labels_[0];
-    for (PosType p = first; p < last; ++p) {
+    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    for (PosType p = min_pos; p < max_pos; ++p) {
       PosType min_label = labels0[p];
       uint32_t min_label_range = 0;
-      bool back_prop = false;
       for (uint32_t r = 1; r < num_ranges; ++r) {
         PosType label = labels_[r][p];
         if (min_label > label) {
           min_label = label;
-          back_prop = true;
           min_label_range = r;
         } else if (min_label < label)
           labels_[r][p] = min_label;
       }
-      for (uint32_t r = 0; back_prop && r < min_label_range; ++r)
+      for (uint32_t r = 0; r < min_label_range; ++r)
         labels_[r][p] = min_label;
     }
   }
