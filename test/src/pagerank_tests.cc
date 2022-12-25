@@ -14,16 +14,20 @@ using namespace pierank;
 class PageRankTestFixture : public ::testing::TestWithParam<std::string> {
 protected:
   void Run(const std::string &file_path) {
+    constexpr double kPrecision = 1e-08;
+    constexpr double kResidual100Iters = 8.976184e-07;
+    constexpr double kResidual50Iters = 4.43647e-05;
+
     PageRank pr0(file_path);
     CHECK(pr0.ok());
     auto[residual, num_iterations] = pr0.Run();
-    EXPECT_NEAR(residual, 9.82924e-07, 1e-06);
-    EXPECT_EQ(num_iterations, 52);
+    EXPECT_NEAR(residual, kResidual100Iters, kPrecision);
+    EXPECT_EQ(num_iterations, 74);
 
     PageRank pr1(file_path, /*mmap=*/false, /*df=*/0.85, /*max_iters=*/50);
     CHECK(pr1.ok());
     std::tie(residual, num_iterations) = pr1.Run();
-    EXPECT_NEAR(residual, 9.75642e-07, 1e-06);
+    EXPECT_NEAR(residual, kResidual50Iters, kPrecision);
     EXPECT_EQ(num_iterations, 50);
 
     // std::vector<double> scores = pr.Scores();
@@ -39,7 +43,7 @@ protected:
     auto pool = std::make_shared<ThreadPool>(kMaxThreads);
     std::tie(residual, num_iterations) = pr4.Run(pool);
     if (mmap) pr4.UnMmap();
-    EXPECT_NEAR(residual, 9.75642e-07, 1e-06);
+    EXPECT_NEAR(residual, kResidual50Iters, kPrecision);
     EXPECT_EQ(num_iterations, 50);
 
     auto page_scores = pr4.TopK(10);

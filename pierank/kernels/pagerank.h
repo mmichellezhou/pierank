@@ -49,7 +49,7 @@ public:
     num_pages_ = std::max(this->Rows(), this->Cols());
     one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
     out_degree_.resize(this->Rows());
-    NumOutboundLinks();
+    NumOutboundLinks(); // accounts for 99% of the time taken by this Ctor.
   }
 
   // Returns <residual, num_iterations> pair or <+infinity, 0> on error
@@ -73,16 +73,17 @@ public:
       return a.second > b.second;
     });
 
+    const auto &score = scores_[num_iterations_ % 2];
     if (k < num_pages_) {
       for (auto i = k; i < num_pages_; ++i) {
         auto it = std::upper_bound(page_scores.begin(),
                                    page_scores.end(),
-                                   scores_[i],
+                                   score[i],
                                    [](T score, const PageScore &p) {
                                      return score > p.second;
                                    });
         if (it != page_scores.end()) {
-          page_scores.back() = std::make_pair(i, scores_[i]);
+          page_scores.back() = std::make_pair(i, score[i]);
           std::rotate(it, page_scores.end() - 1, page_scores.end());
         }
       }
@@ -93,7 +94,7 @@ public:
 
   T Residual() const { return residual_; }
 
-  const std::vector<T> &Scores() const { return scores_; }
+  const std::vector<T> &Scores() const { return scores_[num_iterations_ % 2]; }
 
 protected:
   void NumOutboundLinks() {
@@ -110,8 +111,10 @@ protected:
       num_iterations_ = 0;
       residual_ = std::numeric_limits<T>::max();
       std::fill(residuals_.begin(), residuals_.end(), residual_);
-      scores_.resize(num_pages_);
-      std::fill(scores_.begin(), scores_.end(), one_minus_d_over_n_);
+      scores_[0].resize(num_pages_);
+      std::fill(scores_[0].begin(), scores_[0].end(), one_minus_d_over_n_);
+      scores_[1].resize(num_pages_);
+      std::fill(scores_[1].begin(), scores_[1].end(), one_minus_d_over_n_);
     }
   }
 
@@ -119,6 +122,8 @@ protected:
     DCHECK(this->status_.ok());
     auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T residual = 0.0;
+    const auto &old_score = scores_[num_iterations_ % 2];
+    auto &new_score = scores_[1 - num_iterations_ % 2];
     for (PosType p = min_pos; p < max_pos; ++p) {
       T sum = 0.0;
 
@@ -126,14 +131,14 @@ protected:
         DCHECK_LT(i, this->NumNonZeros()) << p;
         auto pos = this->Pos(i);
         DCHECK_LT(pos, this->Rows());
-        DCHECK_LT(pos, scores_.size());
+        DCHECK_LT(pos, old_score.size());
         DCHECK_GT(out_degree_[pos], 0);
-        sum += scores_[pos] / out_degree_[pos];
+        sum += old_score[pos] / out_degree_[pos];
       }
 
       T score = one_minus_d_over_n_ + damping_factor_ * sum;
-      residual += std::fabs(scores_[p] - score);
-      scores_[p] = score;
+      residual += std::fabs(old_score[p] - score);
+      new_score[p] = score;
     }
 
     residuals_[range_id] = residual;
@@ -154,14 +159,15 @@ protected:
       PageScores *pairs,
       PosType max_pairs = std::numeric_limits<PosType>::max()) {
     DCHECK(this->status_.ok());
-    DCHECK_EQ(scores_.size(), num_pages_);
-    DCHECK_LE(scores_.size(), std::numeric_limits<PosType>::max());
-    PosType size = (scores_.size() < max_pairs) ? scores_.size() : max_pairs;
+    const auto &score = scores_[num_iterations_ % 2];
+    DCHECK_EQ(score.size(), num_pages_);
+    DCHECK_LE(score.size(), std::numeric_limits<PosType>::max());
+    PosType size = (score.size() < max_pairs) ? score.size() : max_pairs;
 
     DCHECK(pairs->empty());
     pairs->clear();
     for (PosType i = 0; i < size; ++i) {
-      pairs->push_back(std::make_pair(i, scores_[i]));
+      pairs->push_back(std::make_pair(i, score[i]));
     }
   }
 
@@ -169,7 +175,7 @@ private:
   T damping_factor_;
   uint64_t num_pages_;
   T one_minus_d_over_n_;
-  std::vector<T> scores_;
+  std::array<std::vector<T>, 2> scores_;
   std::vector<T> residuals_;
   std::vector<uint32_t> out_degree_;
   uint32_t num_iterations_;

@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
                        absl::GetFlag(FLAGS_max_iterations),
                        absl::GetFlag(FLAGS_max_residual));
   CHECK(pr.ok()) << pr.status();
+  // 99% of the matrix read time is spent on computing pr.NumOutboundLinks().
   std::cout << "matrix_read_time_ms: " << timer.Stop() << "\n";
 
   timer.Restart();
