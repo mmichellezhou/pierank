@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
   timer.Restart();
   auto pool =
       std::make_shared<pierank::ThreadPool>(absl::GetFlag(FLAGS_max_threads));
-  bool update_score_in_place = absl::GetFlag(update_score_in_place);
+  bool update_score_in_place = absl::GetFlag(FLAGS_update_score_in_place);
   auto [residual, iterations] = pr.Run(pool, update_score_in_place);
   std::cout << "pagerank_time_ms: " << timer.Stop() << std::endl;
   std::cout << "residual: " << residual << std::endl;
