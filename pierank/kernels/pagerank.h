@@ -53,10 +53,13 @@ public:
   }
 
   // Returns <residual, num_iterations> pair or <+infinity, 0> on error
-  std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
+  std::pair<T, uint32_t> Run(std::shared_ptr <ThreadPool> pool = nullptr,
+                             bool update_score_in_place = false) {
+    update_score_in_place_ = update_score_in_place;
     const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
     residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
-
+    // No need for score-update thread safety if there is only a single range.
+    if (ranges.size() == 1) update_score_in_place_ = true;
     if (!this->ProcessRanges(ranges, pool))
       return std::make_pair(std::numeric_limits<T>::max(), 0);
     return std::make_pair(residual_, num_iterations_);
@@ -73,7 +76,7 @@ public:
       return a.second > b.second;
     });
 
-    const auto &score = scores_[num_iterations_ % 2];
+    const auto &score = Scores();
     if (k < num_pages_) {
       for (auto i = k; i < num_pages_; ++i) {
         auto it = std::upper_bound(page_scores.begin(),
@@ -94,7 +97,11 @@ public:
 
   T Residual() const { return residual_; }
 
-  const std::vector<T> &Scores() const { return scores_[num_iterations_ % 2]; }
+  const std::vector<T> &Scores() const {
+    if (update_score_in_place_)
+      return scores_[0];
+    return scores_[num_iterations_ % 2];
+  }
 
 protected:
   void NumOutboundLinks() {
@@ -113,8 +120,10 @@ protected:
       std::fill(residuals_.begin(), residuals_.end(), residual_);
       scores_[0].resize(num_pages_);
       std::fill(scores_[0].begin(), scores_[0].end(), one_minus_d_over_n_);
-      scores_[1].resize(num_pages_);
-      std::fill(scores_[1].begin(), scores_[1].end(), one_minus_d_over_n_);
+      if (!update_score_in_place_) {
+        scores_[1].resize(num_pages_);
+        std::fill(scores_[1].begin(), scores_[1].end(), one_minus_d_over_n_);
+      }
     }
   }
 
@@ -122,8 +131,9 @@ protected:
     DCHECK(this->status_.ok());
     auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T residual = 0.0;
-    const auto &old_score = scores_[num_iterations_ % 2];
-    auto &new_score = scores_[1 - num_iterations_ % 2];
+    const auto &old_score = Scores();
+    auto &new_score =
+        update_score_in_place_ ? scores_[0] : scores_[1 - num_iterations_ % 2];
     for (PosType p = min_pos; p < max_pos; ++p) {
       T sum = 0.0;
 
@@ -155,11 +165,10 @@ protected:
     return residual_ <= max_residual_ || num_iterations_ >= max_iterations_;
   }
 
-  void InitPageScores(
-      PageScores *pairs,
-      PosType max_pairs = std::numeric_limits<PosType>::max()) {
+  void InitPageScores(PageScores *pairs,
+                      PosType max_pairs = std::numeric_limits<PosType>::max()) {
     DCHECK(this->status_.ok());
-    const auto &score = scores_[num_iterations_ % 2];
+    const auto &score = Scores();
     DCHECK_EQ(score.size(), num_pages_);
     DCHECK_LE(score.size(), std::numeric_limits<PosType>::max());
     PosType size = (score.size() < max_pairs) ? score.size() : max_pairs;
@@ -175,6 +184,7 @@ private:
   T damping_factor_;
   uint64_t num_pages_;
   T one_minus_d_over_n_;
+  bool update_score_in_place_ = false;  // not thread safe but saves RAM
   std::array<std::vector<T>, 2> scores_;
   std::vector<T> residuals_;
   std::vector<uint32_t> out_degree_;

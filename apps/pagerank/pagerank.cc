@@ -18,6 +18,8 @@ ABSL_FLAG(int64_t, print_top_k, 10,
   "Print top-k pages with max PageRank scores or -1 to print all");
 ABSL_FLAG(double, max_residual, 1E-06,
   "Maximum error residual for convergence detection");
+ABSL_FLAG(bool, update_score_in_place, false,
+    "Output PageRank score to same input score vector (not thread safe)");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -35,7 +37,8 @@ int main(int argc, char **argv) {
   timer.Restart();
   auto pool =
       std::make_shared<pierank::ThreadPool>(absl::GetFlag(FLAGS_max_threads));
-  auto [residual, iterations] = pr.Run(pool);
+  bool update_score_in_place = absl::GetFlag(update_score_in_place);
+  auto [residual, iterations] = pr.Run(pool, update_score_in_place);
   std::cout << "pagerank_time_ms: " << timer.Stop() << std::endl;
   std::cout << "residual: " << residual << std::endl;
   std::cout << "iterations: " << iterations << std::endl;
