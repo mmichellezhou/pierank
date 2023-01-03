@@ -46,7 +46,7 @@ public:
     if (!this->status_.ok())
       return;
     CHECK_EQ(this->IndexDim(), 1);
-    num_pages_ = std::max(this->Rows(), this->Cols());
+    num_pages_ = this->MaxDimSize();
     one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
     out_degree_.resize(this->Rows());
     NumOutboundLinks(); // accounts for 99% of the time taken by this Ctor.

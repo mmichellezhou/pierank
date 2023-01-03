@@ -21,6 +21,9 @@ public:
 
   using PosRanges = typename SparseMatrix<PosType, IdxType>::PosRanges;
 
+  using TriplePosRanges =
+      typename SparseMatrix<PosType, IdxType>::TriplePosRanges;
+
   ConnectedComponents(const std::string &file_path, bool mmap_prm_file = false,
                       uint32_t max_iterations = 100) :
       max_iterations_(max_iterations) {
@@ -32,14 +35,19 @@ public:
       this->status_ = this->ReadPieRankMatrixFile(file_path);
     if (!this->status_.ok())
       return;
-    num_nodes_ = std::max(this->Rows(), this->Cols());
+    num_nodes_ = this->MaxDimSize();
   }
 
   // Returns <num_iterations, converged> pair or <0, false> on error
   std::tuple<uint32_t, bool> Run(std::shared_ptr<ThreadPool> pool = nullptr) {
-    const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
-    propagations_.resize(ranges.size());
-    labels_.resize(ranges.size());
+    uint32_t num_ranges = pool ? pool->Size() : 1;
+    TriplePosRanges ranges;
+    ranges[0] = this->ClonePosRange(num_ranges, num_nodes_);
+    ranges[1] = this->SplitIndexDimByNnz(num_ranges);
+    ranges[2] = this->SplitPosIntoRanges(num_nodes_, num_ranges);
+
+    propagations_.resize(num_ranges);
+    labels_.resize(num_ranges);
     for (auto &labels : labels_)
       labels.resize(num_nodes_);
 

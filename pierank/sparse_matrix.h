@@ -100,6 +100,9 @@ public:
 
   using PosRanges = std::vector<PosRange>;
 
+  // PosRanges for InitRanges, UpdateRanges, and ReconcileRanges
+  using TriplePosRanges = std::array<PosRanges, 3>;
+
   using FlexIdxType = FlexIndex<IdxType>;
 
   using FlexPosType = FlexIndex<PosType>;
@@ -142,6 +145,8 @@ public:
   PosType Rows() const { return rows_; }
 
   PosType Cols() const { return cols_; }
+
+  PosType MaxDimSize() const { return std::max(rows_, cols_); }
 
   bool Symmetric() const { return symmetric_; }
 
@@ -273,25 +278,36 @@ public:
     return absl::OkStatus();
   }
 
-  static PosRanges
-  SplitIndexDimByPos(const FlexIdxType &index, uint32_t num_ranges) {
+  static PosRanges ClonePosRange(uint32_t num_copies, PosType max_pos,
+                                 PosType min_pos = 0) {
+    auto range_nnz = std::numeric_limits<IdxType>::max();
+    return PosRanges(num_copies, std::make_tuple(min_pos, max_pos, range_nnz));
+  }
+
+  static PosRanges SplitPosIntoRanges(PosType num_pos, uint32_t num_ranges) {
     DCHECK_GT(num_ranges, 0);
-    if (index.NumItems() == 0)
+    if (num_pos == 0)
       return {std::make_tuple(0, 0, 0)};
-    PosType num_index_pos = index.NumItems() - 1;
     auto range_nnz = std::numeric_limits<IdxType>::max();
     if (num_ranges == 1)
-      return {std::make_tuple(0, num_index_pos, range_nnz)};
-    PosRanges res;
+      return {std::make_tuple(0, num_pos, range_nnz)};
 
-    PosType range_size = UnsignedDivideCeil(num_index_pos, num_ranges);
-    for (PosType min_pos = 0; min_pos < num_index_pos; min_pos += range_size) {
-      PosType max_pos = std::min(min_pos + range_size, num_index_pos);
+    PosRanges res;
+    PosType range_size = UnsignedDivideCeil(num_pos, num_ranges);
+    for (PosType min_pos = 0; min_pos < num_pos; min_pos += range_size) {
+      PosType max_pos = std::min(min_pos + range_size, num_pos);
       res.push_back(std::make_tuple(min_pos, max_pos, range_nnz));
     }
 
     DCHECK_EQ(res.size(), num_ranges);
     return res;
+  }
+
+  static PosRanges
+  SplitIndexDimByPos(const FlexIdxType &index, uint32_t num_ranges) {
+    if (index.NumItems() == 0)
+      return {std::make_tuple(0, 0, 0)};
+    return SplitPosIntoRanges(index.NumItems() - 1, num_ranges);
   }
 
   static PosRanges SplitIndexDimByNnz(const FlexIdxType &index, IdxType nnz,
@@ -589,7 +605,6 @@ protected:
     auto min_pos = std::get<0>(range);
     auto max_pos = std::get<1>(range);
     DCHECK_LT(min_pos, max_pos);
-    max_pos = std::min(max_pos, this->IndexPosEnd());
     return std::make_pair(min_pos, max_pos);
   }
 
@@ -622,6 +637,47 @@ protected:
                           [this, &ranges](uint64_t first, uint64_t last) {
                             for (auto r = first; r < last; ++r)
                               ReconcileRanges(ranges, /*range_id=*/r);
+                          });
+      }
+    }
+    return true;
+  }
+
+  bool ProcessRanges(const TriplePosRanges &ranges,
+                     std::shared_ptr <ThreadPool> pool = nullptr) {
+    if (!this->status_.ok()) return false;
+
+    const auto &ranges0 = ranges[0];
+    if (ranges0.size() == 1) {
+      InitRanges(ranges0, 0);
+    } else {
+      DCHECK(pool);
+      pool->ParallelFor(ranges0.size(), /*items_per_thread=*/1,
+                        [this, &ranges0](uint64_t first, uint64_t last) {
+                          for (auto r = first; r < last; ++r)
+                            InitRanges(ranges0, /*range_id=*/r);
+                        });
+    }
+
+    while (!Stop()) {
+      const auto &ranges1 = ranges[1];
+      if (ranges1.size() == 1)
+        UpdateRanges(ranges1, 0);
+      else {
+        pool->ParallelFor(ranges1.size(), /*items_per_thread=*/1,
+                          [this, &ranges1](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              UpdateRanges(ranges1, /*range_id=*/r);
+                          });
+      }
+      const auto &ranges2 = ranges[2];
+      if (ranges2.size() == 1)
+        ReconcileRanges(ranges2, 0);
+      else {
+        pool->ParallelFor(ranges2.size(), /*items_per_thread=*/1,
+                          [this, &ranges2](uint64_t first, uint64_t last) {
+                            for (auto r = first; r < last; ++r)
+                              ReconcileRanges(ranges2, /*range_id=*/r);
                           });
       }
     }
