@@ -67,11 +67,7 @@ public:
     return res;
   }
 
-  bool HasNext() const {
-    if (count_ >= nnz_)
-      return false;
-    return true;
-  }
+  bool HasNext() const { return count_ < nnz_; }
 
   std::pair<uint32_t, uint32_t> Next() {
     std::pair<uint32_t, uint32_t> ret;
