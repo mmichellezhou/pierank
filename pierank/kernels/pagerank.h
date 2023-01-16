@@ -47,8 +47,9 @@ public:
       return;
     CHECK_EQ(this->IndexDim(), 1);
     num_pages_ = this->MaxDimSize();
+    scores_[0].resize(num_pages_);
+    if (!update_score_in_place_) scores_[1].resize(num_pages_);
     one_minus_d_over_n_ = (1 - damping_factor_) / num_pages_;
-    out_degree_.resize(this->Rows());
     NumOutboundLinks(); // accounts for 99% of the time taken by this Ctor.
   }
 
@@ -56,12 +57,19 @@ public:
   std::pair<T, uint32_t> Run(std::shared_ptr <ThreadPool> pool = nullptr,
                              bool update_score_in_place = false) {
     update_score_in_place_ = update_score_in_place;
-    const auto ranges = this->SplitIndexDimByNnz(pool ? pool->Size() : 1);
-    residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
+    uint32_t num_ranges = pool ? pool->Size() : 1;
+    residual_ = std::numeric_limits<T>::max();
     // No need for score-update thread safety if there is only a single range.
-    if (ranges.size() == 1) update_score_in_place_ = true;
-    if (!this->ProcessRanges(ranges, pool))
+    if (num_ranges == 1) update_score_in_place_ = true;
+    if (!this->ProcessRanges(num_ranges, pool))
       return std::make_pair(std::numeric_limits<T>::max(), 0);
+    auto &scores =
+        update_score_in_place_ ? scores_[0] : scores_[num_iterations_ % 2];
+    // Compute the original PageRank scores (without out-degree adjustment)
+    for (PosType p = 0; p < num_pages_; ++p) {
+      if (out_degree_[p])
+        scores[p] *= out_degree_[p];
+    }
     return std::make_pair(residual_, num_iterations_);
   }
 
@@ -107,6 +115,9 @@ protected:
   void NumOutboundLinks() {
     DCHECK(this->status_.ok());
     auto nnz = this->NumNonZeros();
+    out_degree_.clear();
+    DCHECK_EQ(num_pages_, this->MaxDimSize());
+    out_degree_.resize(num_pages_);
     for (IdxType i = 0; i < nnz; ++i) {
       ++out_degree_[this->Pos(i)];
     }
@@ -116,20 +127,21 @@ protected:
     DCHECK_LT(range_id, ranges.size());
     if (range_id == 0) {
       num_iterations_ = 0;
-      residual_ = std::numeric_limits<T>::max();
-      std::fill(residuals_.begin(), residuals_.end(), residual_);
-      scores_[0].resize(num_pages_);
-      std::fill(scores_[0].begin(), scores_[0].end(), one_minus_d_over_n_);
-      if (!update_score_in_place_) {
-        scores_[1].resize(num_pages_);
-        std::fill(scores_[1].begin(), scores_[1].end(), one_minus_d_over_n_);
-      }
+      residuals_.clear();
+      residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
+    }
+    const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    T init_prob = 1.0 / static_cast<T>(num_pages_);
+    for (PosType p = min_pos; p < max_pos; ++p) {
+      T prob = out_degree_[p] ? init_prob / out_degree_[p] : init_prob;
+      scores_[0][p] = prob;
+      if (!update_score_in_place_) scores_[1][p] = prob;
     }
   }
 
   void UpdateRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK(this->status_.ok());
-    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T residual = 0.0;
     const auto &old_score = Scores();
     auto &new_score =
@@ -143,12 +155,18 @@ protected:
         DCHECK_LT(pos, this->Rows());
         DCHECK_LT(pos, old_score.size());
         DCHECK_GT(out_degree_[pos], 0);
-        sum += old_score[pos] / out_degree_[pos];
+        sum += old_score[pos];
       }
 
       T score = one_minus_d_over_n_ + damping_factor_ * sum;
-      residual += std::fabs(old_score[p] - score);
-      new_score[p] = score;
+      if (out_degree_[p]) {
+        // Undo out-degree adjustment for old score before computing residual.
+        residual += std::fabs(old_score[p] * out_degree_[p] - score);
+        new_score[p] = score / out_degree_[p];
+      } else {
+        residual += std::fabs(old_score[p] - score);
+        new_score[p] = score;
+      }
     }
 
     residuals_[range_id] = residual;
@@ -190,7 +208,7 @@ private:
   std::vector<uint32_t> out_degree_;
   uint32_t num_iterations_;
   uint32_t max_iterations_;
-  T residual_;
+  T residual_ = std::numeric_limits<T>::max();
   T max_residual_;
 };
 

@@ -127,12 +127,12 @@ public:
 
   const FlexIdxType &Index() const { return index_; }
 
+  IdxType Index(PosType pos) const { return index_[pos]; }
+
   // Returns the pos AFTER the max index pos.
   const PosType IndexPosEnd() const {
     return static_cast<PosType>(index_.NumItems() - 1);
   }
-
-  IdxType Index(PosType pos) const { return index_[pos]; }
 
   const FlexPosType &Pos() const { return pos_; }
 
@@ -608,35 +608,44 @@ protected:
     return std::make_pair(min_pos, max_pos);
   }
 
-  bool ProcessRanges(const PosRanges &ranges,
+  bool ProcessRanges(uint32_t max_num_ranges = 1,
                      std::shared_ptr <ThreadPool> pool = nullptr) {
+    DCHECK_GT(max_num_ranges, 0);
     if (!this->status_.ok()) return false;
+    const auto num_ranges = std::min(max_num_ranges, pool ? pool->Size() : 1);
+    const auto pos_balanced_ranges =
+        this->SplitPosIntoRanges(MaxDimSize(), num_ranges);
+    const auto nnz_balanced_ranges = this->SplitIndexDimByNnz(num_ranges);
 
-    if (ranges.size() == 1) {
-      InitRanges(ranges, 0);
+    if (num_ranges == 1) {
+      InitRanges(pos_balanced_ranges, 0);
     } else {
       DCHECK(pool);
-      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                        [this, &ranges](uint64_t first, uint64_t last) {
+      pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
+                        [this, &pos_balanced_ranges](uint64_t first,
+                                                     uint64_t last) {
                           for (auto r = first; r < last; ++r)
-                            InitRanges(ranges, /*range_id=*/r);
+                            InitRanges(pos_balanced_ranges, /*range_id=*/r);
                         });
     }
 
     while (!Stop()) {
-      if (ranges.size() == 1) {
-        UpdateRanges(ranges, 0);
-        ReconcileRanges(ranges, 0);
+      if (num_ranges == 1) {
+        UpdateRanges(nnz_balanced_ranges, 0);
+        ReconcileRanges(pos_balanced_ranges, 0);
       } else {
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                          [this, &ranges](uint64_t first, uint64_t last) {
+        pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
+                          [this, &nnz_balanced_ranges](uint64_t first,
+                                                       uint64_t last) {
                             for (auto r = first; r < last; ++r)
-                              UpdateRanges(ranges, /*range_id=*/r);
+                              UpdateRanges(nnz_balanced_ranges, /*range_id=*/r);
                           });
-        pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
-                          [this, &ranges](uint64_t first, uint64_t last) {
+        pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
+                          [this, &pos_balanced_ranges](uint64_t first,
+                                                       uint64_t last) {
                             for (auto r = first; r < last; ++r)
-                              ReconcileRanges(ranges, /*range_id=*/r);
+                              ReconcileRanges(pos_balanced_ranges,
+                                  /*range_id=*/r);
                           });
       }
     }

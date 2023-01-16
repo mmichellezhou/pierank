@@ -88,7 +88,7 @@ protected:
     DCHECK(this->status_.ok());
     PosType num_props = 0;
     auto &labels = labels_[range_id];
-    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     for (PosType p = min_pos; p < max_pos; ++p) {
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
         auto pos = this->Pos(i);
@@ -116,7 +116,7 @@ protected:
 
     auto num_ranges = ranges.size();
     auto &labels0 = labels_[0];
-    auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
+    const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     for (PosType p = min_pos; p < max_pos; ++p) {
       PosType min_label = labels0[p];
       uint32_t min_label_range = 0;
