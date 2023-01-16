@@ -113,6 +113,9 @@ public:
 
   using UniquePosPtr = std::unique_ptr<FlexPosType>;
 
+  using RangeFunc = void (SparseMatrix<PosType, IdxType>::*)(
+      const PosRanges &ranges, uint32_t range_id);
+
   SparseMatrix() = default;
 
   SparseMatrix(const std::string &prm_file_path, bool mmap = false) {
@@ -284,22 +287,23 @@ public:
     return PosRanges(num_copies, std::make_tuple(min_pos, max_pos, range_nnz));
   }
 
-  static PosRanges SplitPosIntoRanges(PosType num_pos, uint32_t num_ranges) {
-    DCHECK_GT(num_ranges, 0);
+  static PosRanges SplitPosIntoRanges(PosType num_pos, uint32_t max_ranges) {
+    DCHECK_GT(max_ranges, 0);
     if (num_pos == 0)
       return {std::make_tuple(0, 0, 0)};
     auto range_nnz = std::numeric_limits<IdxType>::max();
-    if (num_ranges == 1)
+    if (max_ranges == 1)
       return {std::make_tuple(0, num_pos, range_nnz)};
 
     PosRanges res;
-    PosType range_size = UnsignedDivideCeil(num_pos, num_ranges);
+    PosType range_size = UnsignedDivideCeil(num_pos, max_ranges);
+    DCHECK_GT(range_size, 0);
     for (PosType min_pos = 0; min_pos < num_pos; min_pos += range_size) {
       PosType max_pos = std::min(min_pos + range_size, num_pos);
+      DCHECK_LT(min_pos, max_pos);
       res.push_back(std::make_tuple(min_pos, max_pos, range_nnz));
     }
-
-    DCHECK_EQ(res.size(), num_ranges);
+    DCHECK_LE(res.size(), max_ranges);
     return res;
   }
 
@@ -310,24 +314,25 @@ public:
     return SplitPosIntoRanges(index.NumItems() - 1, num_ranges);
   }
 
+  // Returned PosRanges.size() may be less than max_ranges.
   static PosRanges SplitIndexDimByNnz(const FlexIdxType &index, IdxType nnz,
-                                      uint32_t num_ranges) {
-    DCHECK_GT(num_ranges, 0);
+                                      uint32_t max_ranges) {
+    DCHECK_GT(max_ranges, 0);
     if (index.NumItems() == 0) {
       DCHECK_EQ(nnz, 0);
       return {std::make_tuple(0, 0, 0)};
     }
     PosType num_index_pos = index.NumItems() - 1;
-    if (num_ranges == 1)
+    if (max_ranges == 1)
       return {std::make_tuple(0, num_index_pos, nnz)};
     PosRanges res;
-    IdxType max_nnz_per_range = UnsignedDivideCeil(nnz, num_ranges);
+    IdxType max_nnz_per_range = UnsignedDivideCeil(nnz, max_ranges);
     PosType avg_nnz_per_pos = UnsignedDivideCeil(nnz, num_index_pos);
     PosType pos_step_size = max_nnz_per_range / avg_nnz_per_pos;
     pos_step_size = std::min(pos_step_size, num_index_pos);
     pos_step_size = std::max(pos_step_size, static_cast<PosType>(1));
     PosType min_pos = 0;
-    while ((res.size() < num_ranges - 1) && (min_pos < num_index_pos)) {
+    while ((res.size() < max_ranges - 1) && (min_pos < num_index_pos)) {
       PosType max_pos = min_pos + 1;
       IdxType range_nnz = index[max_pos] - index[min_pos];
       if (range_nnz < max_nnz_per_range) {
@@ -350,32 +355,33 @@ public:
     if (min_pos < num_index_pos) {
       res.push_back(std::make_tuple(min_pos, num_index_pos,
                                     index[num_index_pos] - index[min_pos]));
-      DCHECK_EQ(res.size(), num_ranges);
+      DCHECK_EQ(res.size(), max_ranges);
     }
+    DCHECK_LE(res.size(), max_ranges);
     return res;
   }
 
-  PosRanges SplitIndexDimByPos(uint32_t num_ranges) const {
+  PosRanges SplitIndexDimByPos(uint32_t max_ranges) const {
     DCHECK(this->status_.ok());
-    return SplitIndexDimByPos(index_, num_ranges);
+    return SplitIndexDimByPos(index_, max_ranges);
   }
 
-  PosRanges SplitIndexDimByNnz(uint32_t num_ranges) const {
+  PosRanges SplitIndexDimByNnz(uint32_t max_ranges) const {
     DCHECK(this->status_.ok());
-    return SplitIndexDimByNnz(index_, nnz_, num_ranges);
+    return SplitIndexDimByNnz(index_, nnz_, max_ranges);
   }
 
   uint32_t
-  NumRanges(uint64_t max_nnz_per_range,
+  MaxRanges(uint64_t max_nnz_per_range,
             uint32_t max_ranges = std::numeric_limits<uint32_t>::max()) const {
     return std::min(
         static_cast<uint32_t>(UnsignedDivideCeil(nnz_, max_nnz_per_range)),
         max_ranges);
   }
 
-  uint32_t NumRanges(uint64_t max_nnz_per_range,
+  uint32_t MaxRanges(uint64_t max_nnz_per_range,
                      std::shared_ptr<ThreadPool> pool) const {
-    return NumRanges(max_nnz_per_range, pool ? pool->Size() : 1);
+    return MaxRanges(max_nnz_per_range, pool ? pool->Size() : 1);
   }
 
   // Counts the # of non-zeros (nnz) for each pos in non-index dim
@@ -457,14 +463,14 @@ public:
 
     auto nnz = CountNonIndexDimNnz();
     auto idx = CreateReverseIndex(*nnz);
-    uint32_t num_ranges = NumRanges(max_nnz_per_thread, pool);
-    auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
+    auto ranges =
+        SplitIndexDimByNnz(*idx, nnz_, MaxRanges(max_nnz_per_thread, pool));
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
-    std::vector<UniquePosPtr> poses(num_ranges);
+    std::vector<UniquePosPtr> poses(ranges.size());
     nnz->Reset();
-    if (num_ranges == 1) {
+    if (ranges.size() == 1) {
       auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nnz.get());
       res->pos_ = std::move(*pos.release());
     } else {
@@ -499,8 +505,7 @@ public:
 
     auto nnz = CountNonIndexDimNnz();
     auto idx = CreateReverseIndex(*nnz);
-    uint32_t num_ranges = NumRanges(max_nnz_per_range);
-    auto ranges = SplitIndexDimByNnz(*idx, nnz_, num_ranges);
+    auto ranges = SplitIndexDimByNnz(*idx, nnz_, MaxRanges(max_nnz_per_range));
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
@@ -509,7 +514,7 @@ public:
     nnz->Reset();
     auto pos_min = std::numeric_limits<PosType>::max();
     auto pos_max = std::numeric_limits<PosType>::min();
-    for (uint32_t r = 0; r < num_ranges; ++r) {
+    for (uint32_t r = 0; r < ranges.size(); ++r) {
       auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
       pos_min = std::min(pos_min, pos->MinValue());
       pos_max = std::max(pos_max, pos->MaxValue());
@@ -523,7 +528,7 @@ public:
     }
     DCHECK_GE(pos_min, 0);
     DCHECK_LT(pos_max, res->index_dim_ ? res->rows_ : res->cols_);
-    DCHECK_EQ(tmp_pos_infos.size(), num_ranges);
+    DCHECK_EQ(tmp_pos_infos.size(), ranges.size());
 
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
@@ -608,46 +613,40 @@ protected:
     return std::make_pair(min_pos, max_pos);
   }
 
-  bool ProcessRanges(uint32_t max_num_ranges = 1,
-                     std::shared_ptr <ThreadPool> pool = nullptr) {
-    DCHECK_GT(max_num_ranges, 0);
-    if (!this->status_.ok()) return false;
-    const auto num_ranges = std::min(max_num_ranges, pool ? pool->Size() : 1);
-    const auto pos_balanced_ranges =
-        this->SplitPosIntoRanges(MaxDimSize(), num_ranges);
-    const auto nnz_balanced_ranges = this->SplitIndexDimByNnz(num_ranges);
-
-    if (num_ranges == 1) {
-      InitRanges(pos_balanced_ranges, 0);
+  void RunRangeFunc(RangeFunc func, const PosRanges &ranges,
+                    std::shared_ptr<ThreadPool> pool = nullptr) {
+    if (ranges.size() == 1) {
+      (this->*func)(ranges, 0);
     } else {
       DCHECK(pool);
-      pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
-                        [this, &pos_balanced_ranges](uint64_t first,
-                                                     uint64_t last) {
+      pool->ParallelFor(ranges.size(), /*items_per_thread=*/1,
+                        [this, func, &ranges](uint64_t first, uint64_t last) {
                           for (auto r = first; r < last; ++r)
-                            InitRanges(pos_balanced_ranges, /*range_id=*/r);
+                            (this->*func)(ranges, /*range_id=*/r);
                         });
     }
+  }
 
+  auto RangeFuncs() const {
+    return std::make_tuple(&SparseMatrix<PosType, IdxType>::InitRanges,
+                           &SparseMatrix<PosType, IdxType>::UpdateRanges,
+                           &SparseMatrix<PosType, IdxType>::ReconcileRanges);
+  }
+
+  bool ProcessRanges(uint32_t max_ranges = 1,
+                     std::shared_ptr<ThreadPool> pool = nullptr) {
+    DCHECK_GT(max_ranges, 0);
+    if (!this->status_.ok()) return false;
+    max_ranges = std::min(max_ranges, pool ? pool->Size() : 1);
+    const auto pos_balanced_ranges =
+        this->SplitPosIntoRanges(MaxDimSize(), max_ranges);
+    const auto nnz_balanced_ranges = this->SplitIndexDimByNnz(max_ranges);
+
+    auto[init, update, reconcile] = RangeFuncs();
+    RunRangeFunc(init, pos_balanced_ranges, pool);
     while (!Stop()) {
-      if (num_ranges == 1) {
-        UpdateRanges(nnz_balanced_ranges, 0);
-        ReconcileRanges(pos_balanced_ranges, 0);
-      } else {
-        pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
-                          [this, &nnz_balanced_ranges](uint64_t first,
-                                                       uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              UpdateRanges(nnz_balanced_ranges, /*range_id=*/r);
-                          });
-        pool->ParallelFor(num_ranges, /*items_per_thread=*/1,
-                          [this, &pos_balanced_ranges](uint64_t first,
-                                                       uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              ReconcileRanges(pos_balanced_ranges,
-                                  /*range_id=*/r);
-                          });
-      }
+      RunRangeFunc(update, nnz_balanced_ranges, pool);
+      RunRangeFunc(reconcile, pos_balanced_ranges, pool);
     }
     return true;
   }
@@ -656,39 +655,11 @@ protected:
                      std::shared_ptr <ThreadPool> pool = nullptr) {
     if (!this->status_.ok()) return false;
 
-    const auto &ranges0 = ranges[0];
-    if (ranges0.size() == 1) {
-      InitRanges(ranges0, 0);
-    } else {
-      DCHECK(pool);
-      pool->ParallelFor(ranges0.size(), /*items_per_thread=*/1,
-                        [this, &ranges0](uint64_t first, uint64_t last) {
-                          for (auto r = first; r < last; ++r)
-                            InitRanges(ranges0, /*range_id=*/r);
-                        });
-    }
-
+    auto[init, update, reconcile] = RangeFuncs();
+    RunRangeFunc(init, ranges[0], pool);
     while (!Stop()) {
-      const auto &ranges1 = ranges[1];
-      if (ranges1.size() == 1)
-        UpdateRanges(ranges1, 0);
-      else {
-        pool->ParallelFor(ranges1.size(), /*items_per_thread=*/1,
-                          [this, &ranges1](uint64_t first, uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              UpdateRanges(ranges1, /*range_id=*/r);
-                          });
-      }
-      const auto &ranges2 = ranges[2];
-      if (ranges2.size() == 1)
-        ReconcileRanges(ranges2, 0);
-      else {
-        pool->ParallelFor(ranges2.size(), /*items_per_thread=*/1,
-                          [this, &ranges2](uint64_t first, uint64_t last) {
-                            for (auto r = first; r < last; ++r)
-                              ReconcileRanges(ranges2, /*range_id=*/r);
-                          });
-      }
+      RunRangeFunc(update, ranges[1], pool);
+      RunRangeFunc(reconcile, ranges[2], pool);
     }
     return true;
   }

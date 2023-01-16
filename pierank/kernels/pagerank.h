@@ -57,17 +57,17 @@ public:
   std::pair<T, uint32_t> Run(std::shared_ptr <ThreadPool> pool = nullptr,
                              bool update_score_in_place = false) {
     update_score_in_place_ = update_score_in_place;
-    uint32_t num_ranges = pool ? pool->Size() : 1;
+    uint32_t max_ranges = pool ? pool->Size() : 1;
     residual_ = std::numeric_limits<T>::max();
     // No need for score-update thread safety if there is only a single range.
-    if (num_ranges == 1) update_score_in_place_ = true;
-    if (!this->ProcessRanges(num_ranges, pool))
+    if (max_ranges == 1) update_score_in_place_ = true;
+    if (!this->ProcessRanges(max_ranges, pool))
       return std::make_pair(std::numeric_limits<T>::max(), 0);
     auto &scores =
         update_score_in_place_ ? scores_[0] : scores_[num_iterations_ % 2];
     // Compute the original PageRank scores (without out-degree adjustment)
     for (PosType p = 0; p < num_pages_; ++p) {
-      if (out_degree_[p])
+      if (out_degree_[p] > 1)
         scores[p] *= out_degree_[p];
     }
     return std::make_pair(residual_, num_iterations_);
@@ -106,9 +106,7 @@ public:
   T Residual() const { return residual_; }
 
   const std::vector<T> &Scores() const {
-    if (update_score_in_place_)
-      return scores_[0];
-    return scores_[num_iterations_ % 2];
+    return update_score_in_place_ ? scores_[0] : scores_[num_iterations_ % 2];
   }
 
 protected:
@@ -128,12 +126,12 @@ protected:
     if (range_id == 0) {
       num_iterations_ = 0;
       residuals_.clear();
-      residuals_.resize(ranges.size(), std::numeric_limits<T>::max());
+      residuals_.resize(ranges.size());
     }
     const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T init_prob = 1.0 / static_cast<T>(num_pages_);
     for (PosType p = min_pos; p < max_pos; ++p) {
-      T prob = out_degree_[p] ? init_prob / out_degree_[p] : init_prob;
+      T prob = out_degree_[p] > 1 ? init_prob / out_degree_[p] : init_prob;
       scores_[0][p] = prob;
       if (!update_score_in_place_) scores_[1][p] = prob;
     }
@@ -159,7 +157,7 @@ protected:
       }
 
       T score = one_minus_d_over_n_ + damping_factor_ * sum;
-      if (out_degree_[p]) {
+      if (out_degree_[p] > 1) {
         // Undo out-degree adjustment for old score before computing residual.
         residual += std::fabs(old_score[p] * out_degree_[p] - score);
         new_score[p] = score / out_degree_[p];
