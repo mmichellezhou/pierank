@@ -100,7 +100,7 @@ public:
 
   using PosRanges = std::vector<PosRange>;
 
-  // PosRanges for InitRanges, UpdateRanges, and ReconcileRanges
+  // PosRanges for InitRanges, UpdateRanges, and SyncRanges
   using TriplePosRanges = std::array<PosRanges, 3>;
 
   using FlexIdxType = FlexIndex<IdxType>;
@@ -599,7 +599,7 @@ protected:
 
   virtual void UpdateRanges(const PosRanges &ranges, uint32_t range_id) {}
 
-  virtual void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) {}
+  virtual void SyncRanges(const PosRanges &ranges, uint32_t range_id) {}
 
   virtual bool Stop() const { return true; }
 
@@ -630,7 +630,7 @@ protected:
   auto RangeFuncs() const {
     return std::make_tuple(&SparseMatrix<PosType, IdxType>::InitRanges,
                            &SparseMatrix<PosType, IdxType>::UpdateRanges,
-                           &SparseMatrix<PosType, IdxType>::ReconcileRanges);
+                           &SparseMatrix<PosType, IdxType>::SyncRanges);
   }
 
   bool ProcessRanges(uint32_t max_ranges = 1,
@@ -642,11 +642,11 @@ protected:
         this->SplitPosIntoRanges(MaxDimSize(), max_ranges);
     const auto nnz_balanced_ranges = this->SplitIndexDimByNnz(max_ranges);
 
-    auto[init, update, reconcile] = RangeFuncs();
+    auto[init, update, sync] = RangeFuncs();
     RunRangeFunc(init, pos_balanced_ranges, pool);
     while (!Stop()) {
       RunRangeFunc(update, nnz_balanced_ranges, pool);
-      RunRangeFunc(reconcile, pos_balanced_ranges, pool);
+      RunRangeFunc(sync, pos_balanced_ranges, pool);
     }
     return true;
   }
@@ -655,11 +655,11 @@ protected:
                      std::shared_ptr <ThreadPool> pool = nullptr) {
     if (!this->status_.ok()) return false;
 
-    auto[init, update, reconcile] = RangeFuncs();
+    auto[init, update, sync] = RangeFuncs();
     RunRangeFunc(init, ranges[0], pool);
     while (!Stop()) {
       RunRangeFunc(update, ranges[1], pool);
-      RunRangeFunc(reconcile, ranges[2], pool);
+      RunRangeFunc(sync, ranges[2], pool);
     }
     return true;
   }

@@ -105,7 +105,7 @@ protected:
     propagations_[range_id] = num_props;
   }
 
-  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) override {
+  void SyncRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK_LT(range_id, ranges.size());
     if (range_id == 0) {
       ++num_iterations_;

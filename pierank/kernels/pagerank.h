@@ -170,7 +170,7 @@ protected:
     residuals_[range_id] = residual;
   }
 
-  void ReconcileRanges(const PosRanges &ranges, uint32_t range_id) override {
+  void SyncRanges(const PosRanges &ranges, uint32_t range_id) override {
     if (range_id == 0) {
       ++num_iterations_;
       residual_ = std::accumulate(residuals_.begin(), residuals_.end(), 0.0);
