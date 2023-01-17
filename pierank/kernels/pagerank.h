@@ -32,6 +32,8 @@ public:
 
   using PageScores = std::vector<PageScore>;
 
+  constexpr static uint32_t kMaxThreads = 256;
+
   PageRank(const std::string &file_path, bool mmap_prm_file = false,
            T damping_factor = 0.85, uint32_t max_iterations = 100,
            T max_residual = 1e-6) :
@@ -54,13 +56,15 @@ public:
   }
 
   // Returns <residual, num_iterations> pair or <+infinity, 0> on error
-  std::pair<T, uint32_t> Run(std::shared_ptr <ThreadPool> pool = nullptr,
+  std::pair<T, uint32_t> Run(std::shared_ptr<ThreadPool> pool = nullptr,
                              bool update_score_in_place = false) {
     update_score_in_place_ = update_score_in_place;
-    uint32_t max_ranges = pool ? pool->Size() : 1;
+    uint32_t max_ranges = std::min(kMaxThreads, pool ? pool->Size() : 1);
     residual_ = std::numeric_limits<T>::max();
     // No need for score-update thread safety if there is only a single range.
     if (max_ranges == 1) update_score_in_place_ = true;
+    num_iterations_ = 0;
+    residuals_.fill(0);
     if (!this->ProcessRanges(max_ranges, pool))
       return std::make_pair(std::numeric_limits<T>::max(), 0);
     auto &scores =
@@ -123,11 +127,6 @@ protected:
 
   void InitRanges(const PosRanges &ranges, uint32_t range_id) override {
     DCHECK_LT(range_id, ranges.size());
-    if (range_id == 0) {
-      num_iterations_ = 0;
-      residuals_.clear();
-      residuals_.resize(ranges.size());
-    }
     const auto[min_pos, max_pos] = this->RangeMinMaxPos(ranges, range_id);
     T init_prob = 1.0 / static_cast<T>(num_pages_);
     for (PosType p = min_pos; p < max_pos; ++p) {
@@ -202,7 +201,7 @@ private:
   T one_minus_d_over_n_;
   bool update_score_in_place_ = false;  // not thread safe but saves RAM
   std::array<std::vector<T>, 2> scores_;
-  std::vector<T> residuals_;
+  std::array<T, kMaxThreads> residuals_;
   std::vector<uint32_t> out_degree_;
   uint32_t num_iterations_;
   uint32_t max_iterations_;
