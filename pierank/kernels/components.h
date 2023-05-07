@@ -75,8 +75,8 @@ protected:
   void InitRanges(const PosRanges &ranges, uint32_t range_id) override {
     if (range_id == 0) {
       num_iterations_ = 0;
-      num_propagations_ = std::numeric_limits<IdxType>::max();
-      std::fill(propagations_.begin(), propagations_.end(), num_propagations_);
+      num_propagations_ = 0;
+      std::fill(propagations_.begin(), propagations_.end(), 0);
     }
     DCHECK_LT(range_id, ranges.size());
     auto &labels = labels_[range_id];
@@ -134,7 +134,8 @@ protected:
   }
 
   bool Stop() const override {
-    return num_propagations_ == 0 || num_iterations_ >= max_iterations_;
+    return (num_propagations_ == 0 && num_iterations_ > 0) ||
+           num_iterations_ >= max_iterations_;
   }
 
 private:
