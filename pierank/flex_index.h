@@ -68,7 +68,8 @@ public:
   }
 
   FlexIndex(uint32_t item_size, uint64_t num_items) :
-      item_size_(item_size), vals_(item_size * num_items, '\0') {}
+      item_size_(item_size), num_items_(num_items),
+      vals_(item_size * num_items, '\0') {}
 
   FlexIndex(const FlexIndex &) = delete;
 
@@ -76,27 +77,51 @@ public:
 
   FlexIndex &operator=(FlexIndex &&) = default;
 
-  bool IsCompressed() const { return item_size_ < sizeof(T); }
+  bool HasSketch() const { return sketch_bits_ > 0; }
 
   void Append(T val) {
     DCHECK(vals_mmap_.empty());
     std::size_t old_size = vals_.size();
     vals_.resize(old_size + item_size_);
+    if (!shift_by_min_val_) {
+      min_val_ = std::min(min_val_, val);
+      max_val_ = std::max(max_val_, val);
+    } else {
+      DCHECK_LT(item_size_, sizeof(T));
+      DCHECK_GT(min_val_, 0);
+      DCHECK_GE(val, min_val_);
+      DCHECK_LE(val, max_val_);
+      val -= min_val_;
+    }
+    if (sketch_bits_) {
+      uint64_t sketch_idx = num_items_ >> sketch_bits_;
+      if (num_items_ & sketch_bit_mask_) {
+        DCHECK_GE(val, sketch_[sketch_idx]);
+        val -= sketch_[sketch_idx];
+      } else {
+        DCHECK_EQ(sketch_idx, sketch_.size());
+        sketch_.push_back(val);
+        val = 0;
+      }
+    }
     if (item_size_ == sizeof(T))
       *(reinterpret_cast<T *>(&vals_[old_size])) = val;
     else
       PRK_MEMCPY(&vals_[old_size], &val, item_size_);
-    min_val_ = std::min(min_val_, val);
-    max_val_ = std::max(max_val_, val);
+
+    ++num_items_;
   }
 
   void Append(const FlexIndex<T> &other) {
     DCHECK(vals_mmap_.empty());
     DCHECK_EQ(item_size_, other.item_size_);
     DCHECK_EQ(shift_by_min_val_, other.shift_by_min_val_);
+    DCHECK(!sketch_bits_);
+    DCHECK(!other.sketch_bits_);
     min_val_ = std::min(min_val_, other.min_val_);
     max_val_ = std::max(max_val_, other.max_val_);
     vals_.append(other.vals_);
+    num_items_ += other.NumItems();
   }
 
   inline const char *Data() const {
@@ -105,16 +130,24 @@ public:
 
   T operator[](uint64_t idx) const {
     DCHECK(vals_.empty() || vals_mmap_.empty());
+    DCHECK_LT(idx, num_items_);
+    DCHECK(item_size_ < sizeof(T) || !shift_by_min_val_);
+    DCHECK(item_size_ < sizeof(T) || !sketch_bits_);
     if (item_size_ == sizeof(T)) {
       return vals_mmap_.empty()
              ? reinterpret_cast<const T *>(vals_.data())[idx]
              : reinterpret_cast<const T *>(vals_mmap_.data())[idx];
     }
+
     auto *ptr = Data();
     ptr += idx * item_size_;
-
-    T res = 0;
+    T res;
     PRK_MEMCPY(&res, ptr, item_size_);
+
+    if (sketch_bits_) {
+      DCHECK_LT(idx >> sketch_bits_, sketch_.size());
+      res += sketch_[idx >> sketch_bits_];
+    }
 
     if (shift_by_min_val_)
       res += min_val_;
@@ -129,6 +162,8 @@ public:
 
   void SetItem(uint64_t idx, T value) {
     DCHECK(vals_mmap_.empty());
+    DCHECK(!sketch_bits_);
+    DCHECK_LT(idx, num_items_);
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
     if (item_size_ == sizeof(T))
       reinterpret_cast<T *>(vals_.data())[idx] = value;
@@ -142,7 +177,9 @@ public:
 
   T IncItem(uint64_t idx, T delta = 1) {
     DCHECK(vals_mmap_.empty());
+    DCHECK(!sketch_bits_);
     DCHECK_GT(delta, 0);
+    DCHECK_LT(idx, num_items_);
     DCHECK_LE((idx + 1) * item_size_, vals_.size());
     T res = 0;
     if (item_size_ == sizeof(T))
@@ -167,10 +204,11 @@ public:
     return vals_mmap_.size();
   }
 
-  uint64_t NumItems() const {
+  inline uint64_t NumItems() const {
     DCHECK_GT(item_size_, 0);
     DCHECK_EQ(Size() % item_size_, 0);
-    return Size() / item_size_;
+    DCHECK_EQ(num_items_, Size() / item_size_);
+    return num_items_;
   }
 
   T MinValue() const { return min_val_; }
@@ -223,8 +261,7 @@ public:
   template<typename OutputStreamType>
   bool WriteValues(OutputStreamType *os, uint32_t item_size,
                    bool shift_by_min_value) const {
-    uint64_t num_items = NumItems();
-    if (!WriteUint64(os, item_size * num_items)) return false;
+    if (!WriteUint64(os, item_size * num_items_)) return false;
     int shift;
     if (ShiftByMinValue() == shift_by_min_value)
       shift = 0;
@@ -232,7 +269,7 @@ public:
       shift = -1;
     else
       shift = 1;
-    for (uint64_t i = 0; i < num_items; ++i) {
+    for (uint64_t i = 0; i < num_items_; ++i) {
       T val = (*this)[i];
       if (shift < 0) {
         DCHECK_GE(val, min_val_);
@@ -252,14 +289,14 @@ public:
     auto size = ReadUint64(is);
     if (!*is) return false;
     CHECK_EQ(size % item_size, 0);
-    uint64_t num_items = size / item_size;
-    uint64_t new_size = num_items * item_size_;
+    num_items_ = size / item_size;
+    uint64_t new_size = num_items_ * item_size_;
     if (vals_.size() < new_size)
       vals_.resize(new_size);
     if (value_shift == 0 && item_size == item_size_)
       return ReadData<InputStreamType>(is, vals_.data(), size);
 
-    for (uint64_t i = 0; i < num_items; ++i) {
+    for (uint64_t i = 0; i < num_items_; ++i) {
       auto val = ReadInteger<T>(is, item_size);
       DCHECK_LT(static_cast<int64_t>(val) + value_shift,
                 1ULL << item_size_ * 8);
@@ -303,6 +340,7 @@ public:
     min_val_ = ReadUint64AndConvert<T>(&file, offset);
     max_val_ = ReadUint64AndConvert<T>(&file, offset);
     auto size = ReadUint64(&file, offset);
+    num_items_ = size / item_size_;
     if (!file)
       return absl::InternalError(absl::StrCat("Error reading file: ", path));
     file.close();
@@ -340,7 +378,11 @@ public:
 
 private:
   uint32_t item_size_;
+  uint64_t num_items_ = 0;
   bool shift_by_min_val_ = false;
+  uint32_t sketch_bits_ = 0;
+  uint64_t sketch_bit_mask_ = 0;
+  std::vector<T> sketch_;
   T min_val_ = std::numeric_limits<T>::max();
   T max_val_ = std::numeric_limits<T>::min();
   std::string vals_;
