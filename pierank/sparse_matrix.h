@@ -571,9 +571,12 @@ public:
     absl::StrAppend(&res, tab, "symmetric: ", symmetric_, "\n");
     absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
     indent += 2;
-    absl::StrAppend(&res, tab, "index:\n",
+    absl::StrAppend(&res, tab, "index {\n",
                     index_.DebugString(max_items, indent));
-    absl::StrAppend(&res, tab, "pos:\n", pos_.DebugString(max_items, indent));
+    absl::StrAppend(&res, tab, "}\n");
+    absl::StrAppend(&res, tab, "pos {\n", pos_.DebugString(max_items, indent));
+    absl::StrAppend(&res, tab, "}\n");
+
     return res;
   }
 

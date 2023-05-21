@@ -45,7 +45,6 @@ namespace pierank {
     }                                                                 \
   } while(0)
 
-
 template<typename T>
 class FlexIndex {
 public:
@@ -121,7 +120,7 @@ public:
     min_val_ = std::min(min_val_, other.min_val_);
     max_val_ = std::max(max_val_, other.max_val_);
     vals_.append(other.vals_);
-    num_items_ += other.NumItems();
+    num_items_ += other.num_items_;
   }
 
   inline const char *Data() const {
@@ -224,6 +223,7 @@ public:
 
   void Reset() {
     DCHECK(vals_mmap_.empty());
+    std::memset(sketch_.data(), 0, sketch_.size());
     std::memset(vals_.data(), 0, vals_.size());
   }
 
@@ -233,12 +233,13 @@ public:
 
   friend bool operator==(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
     CHECK_EQ(lhs.shift_by_min_val_, rhs.shift_by_min_val_) << "Not supported";
-    if (lhs.item_size_ == rhs.item_size_) {
-      if (lhs.Size() != rhs.Size()) return false;
+    if (lhs.num_items_ != rhs.num_items_) return false;
+    if (lhs.item_size_ == rhs.item_size_ && lhs.Size() == rhs.Size()
+        && lhs.sketch_bits_ == rhs.sketch_bits_) {
       return memcmp(lhs.Data(), rhs.Data(), lhs.Size()) == 0;
     }
-    if (lhs.NumItems() != rhs.NumItems()) return false;
-    for (uint64_t i = 0; i < lhs.NumItems(); ++i) {
+
+    for (uint64_t i = 0; i < lhs.num_items_; ++i) {
       if (lhs[i] != rhs[i]) return false;
     }
     return true;
@@ -363,28 +364,42 @@ public:
     std::string res;
     std::string tab(indent, ' ');
     absl::StrAppend(&res, tab, "item_size: ", item_size_, "\n");
-    absl::StrAppend(&res, tab, "shift_by_min_val: ", shift_by_min_val_, "\n");
     absl::StrAppend(&res, tab, "min_val: ", min_val_, "\n");
     absl::StrAppend(&res, tab, "max_val: ", max_val_, "\n");
-    absl::StrAppend(&res, tab, "vals[", NumItems(), "]:");
-    max_items = std::min(max_items, NumItems());
-    for (uint64_t i = 0; i < max_items; ++i)
-      absl::StrAppend(&res, " ", (*this)[i]);
-    if (max_items < NumItems())
-      absl::StrAppend(&res, " ...");
-    absl::StrAppend(&res, "\n");
+    absl::StrAppend(&res, tab, "num_items: ", num_items_, "\n");
+    absl::StrAppend(&res, tab, "shift_by_min_val: ", shift_by_min_val_, "\n");
+    absl::StrAppend(&res, tab, "sketch_bits: ", sketch_bits_, "\n");
+    absl::StrAppend(&res, tab, "sketch: [");
+    uint64_t max_sketch_items = std::min((uint64_t)sketch_.size(), max_items);
+    for (uint64_t i = 0; i < max_sketch_items; ++i) {
+      if (i > 0) absl::StrAppend(&res, ", ");
+      absl::StrAppend(&res, sketch_[i]);
+    }
+    if (max_sketch_items < sketch_.size())
+      absl::StrAppend(&res, ", ...");
+    absl::StrAppend(&res, "]\n");
+    absl::StrAppend(&res, tab, "vals: [");
+    uint64_t max_value_items = std::min(num_items_, max_items);
+    for (uint64_t i = 0; i < max_value_items; ++i) {
+      if (i > 0) absl::StrAppend(&res, ", ");
+      absl::StrAppend(&res, (*this)[i]);
+    }
+    if (max_value_items < num_items_)
+      absl::StrAppend(&res, ", ...");
+    absl::StrAppend(&res, "]\n");
+
     return res;
   }
 
 private:
   uint32_t item_size_;
+  T min_val_ = std::numeric_limits<T>::max();
+  T max_val_ = std::numeric_limits<T>::min();
   uint64_t num_items_ = 0;
   bool shift_by_min_val_ = false;
   uint32_t sketch_bits_ = 0;
   uint64_t sketch_bit_mask_ = 0;
   std::vector<T> sketch_;
-  T min_val_ = std::numeric_limits<T>::max();
-  T max_val_ = std::numeric_limits<T>::min();
   std::string vals_;
   mio::mmap_source vals_mmap_;
 };
