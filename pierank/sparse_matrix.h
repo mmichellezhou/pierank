@@ -141,8 +141,6 @@ public:
 
   PosType Pos(IdxType idx) const { return pos_[idx]; }
 
-  bool PosIsCompressed() const { return pos_.IsCompressed(); }
-
   IdxType NumNonZeros() const { return nnz_; }
 
   PosType Rows() const { return rows_; }

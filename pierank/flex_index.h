@@ -256,6 +256,13 @@ public:
     CHECK(shift_by_min_val_ == shift_by_min_value || shift_by_min_value);
     if (!ConvertAndWriteUint64(os, min_val_)) return false;
     if (!ConvertAndWriteUint64(os, max_val_)) return false;
+
+    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
+    CHECK_LT(sketch_bits_, 8 * sizeof(T));
+    CHECK_NE(sketch_bits_ > 0, sketch_.empty());
+    if (!WriteUint32(os, sketch_bits_)) return false;
+    if (!WriteSketch(os)) return false;
+
     return true;
   }
 
@@ -307,6 +314,31 @@ public:
     return true;
   }
 
+  template<typename OutputStreamType>
+  bool WriteSketch(OutputStreamType *os) const {
+    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
+    CHECK_LT(sketch_bits_, 8 * sizeof(T));
+    CHECK_NE(sketch_bits_ > 0, sketch_.empty());
+
+    if (!WriteUint64(os, sketch_.size())) return false;
+    return sketch_.empty() ? true :
+           WriteData<OutputStreamType, T>(os, sketch_.data(), sketch_.size());
+  }
+
+  template<typename InputStreamType>
+  bool ReadSketch(InputStreamType *is, uint64_t *offset = nullptr) {
+    auto size = ReadUint64(is, offset);
+    if (!*is) return false;
+    sketch_.resize(size);
+    if (offset)
+      *offset += size * sizeof(T);
+    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
+    CHECK_LT(sketch_bits_, 8 * sizeof(T));
+    CHECK_EQ(sketch_bits_ > 0, size > 0);
+
+    return size ? ReadData<InputStreamType, T>(is, sketch_.data(), size) : true;
+  }
+
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
     auto [min_item_size, shift_by_min_val] = index.MinEncode();
     if (!index.WriteAllButValues(&os, min_item_size, shift_by_min_val))
@@ -317,33 +349,58 @@ public:
   }
 
   friend std::istream &operator>>(std::istream &is, FlexIndex &index) {
-    index.item_size_ = ReadUint32(&is);
-    if (!is) return is;
-    index.shift_by_min_val_ = ReadUint32AndConvert<bool>(&is);
-    if (!is) return is;
-    index.min_val_ = ReadUint64AndConvert<T>(&is);
-    if (!is) return is;
-    index.max_val_ = ReadUint64AndConvert<T>(&is);
-    if (!is) return is;
-    index.ReadValues(&is, index.item_size_);
-
+    auto status = index.Read(&is);
+    if (!status.ok())
+      LOG(ERROR) << status.message();
     return is;
+  }
+
+  // NOTE: offset == nullptr implies mmap == false, which means the values
+  // will be read as well; otherwise mmap == true, which means the values
+  // will NOT be read.
+  template<typename InputStreamType>
+  absl::Status Read(InputStreamType *is, uint64_t *offset = nullptr) {
+    auto item_size = ReadUint32(is, offset);
+    static_assert(std::is_same_v<decltype(item_size_), decltype(item_size)>);
+    item_size_ = item_size;
+    shift_by_min_val_ = ReadUint32AndConvert<bool>(is, offset);
+    min_val_ = ReadUint64AndConvert<T>(is, offset);
+    max_val_ = ReadUint64AndConvert<T>(is, offset);
+    sketch_bits_ = ReadUint32(is, offset);
+    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
+    CHECK_LT(sketch_bits_, 8 * sizeof(T));
+    sketch_bit_mask_= static_cast<uint64_t>(-1) << sketch_bits_;
+    if (!ReadSketch(is, offset))
+      return absl::InternalError("Error reading sketch");
+    CHECK_NE(sketch_bits_ > 0, sketch_.empty());
+
+    // Only ReadValues if offset == nullptr, which means mmap == false
+    if (!offset && !ReadValues(is, item_size_))
+      return absl::InternalError("Error reading values");
+
+    return absl::OkStatus();
   }
 
   absl::Status Mmap(const std::string &path, uint64_t *offset) {
     auto file_or = OpenReadFile(path);
     if (!file_or.ok()) return file_or.status();
     std::ifstream file = std::move(*file_or);
-    auto item_size = ReadUint32AtOffset(&file, offset);
-    static_assert(std::is_same_v<decltype(item_size_), decltype(item_size)>);
-    item_size_ = item_size;
-    shift_by_min_val_ = ReadUint32AndConvert<bool>(&file, offset);
-    min_val_ = ReadUint64AndConvert<T>(&file, offset);
-    max_val_ = ReadUint64AndConvert<T>(&file, offset);
-    auto size = ReadUint64(&file, offset);
-    num_items_ = size / item_size_;
-    if (!file)
+    if (!Seek(&file, *offset))
+      return absl::InternalError(absl::StrCat("Error seeking file: ", path));
+
+    auto status = Read(&file, offset);
+    if (!status.ok()) {
+      LOG(ERROR) << status.message();
       return absl::InternalError(absl::StrCat("Error reading file: ", path));
+    }
+
+    auto size = ReadUint64(&file, offset);
+    if (!file) {
+      LOG(ERROR) << "Error reading value size";
+      return absl::InternalError(absl::StrCat("Error reading file: ", path));
+    }
+    CHECK_EQ(size % item_size_, 0);
+    num_items_ = size / item_size_;
     file.close();
 
     auto mmap = MmapReadOnlyFile(path, *offset, size);
@@ -375,8 +432,10 @@ public:
       if (i > 0) absl::StrAppend(&res, ", ");
       absl::StrAppend(&res, sketch_[i]);
     }
-    if (max_sketch_items < sketch_.size())
-      absl::StrAppend(&res, ", ...");
+    if (max_sketch_items < sketch_.size()) {
+      if (max_sketch_items > 0) absl::StrAppend(&res, ", ");
+      absl::StrAppend(&res, "...");
+    }
     absl::StrAppend(&res, "]\n");
     absl::StrAppend(&res, tab, "vals: [");
     uint64_t max_value_items = std::min(num_items_, max_items);
@@ -384,8 +443,10 @@ public:
       if (i > 0) absl::StrAppend(&res, ", ");
       absl::StrAppend(&res, (*this)[i]);
     }
-    if (max_value_items < num_items_)
-      absl::StrAppend(&res, ", ...");
+    if (max_value_items < num_items_) {
+      if (max_value_items > 0) absl::StrAppend(&res, ", ");
+      absl::StrAppend(&res, "...");
+    }
     absl::StrAppend(&res, "]\n");
 
     return res;
@@ -393,12 +454,12 @@ public:
 
 private:
   uint32_t item_size_;
+  bool shift_by_min_val_ = false;
   T min_val_ = std::numeric_limits<T>::max();
   T max_val_ = std::numeric_limits<T>::min();
   uint64_t num_items_ = 0;
-  bool shift_by_min_val_ = false;
   uint32_t sketch_bits_ = 0;
-  uint64_t sketch_bit_mask_ = 0;
+  uint64_t sketch_bit_mask_ = static_cast<uint64_t>(-1);
   std::vector<T> sketch_;
   std::string vals_;
   mio::mmap_source vals_mmap_;

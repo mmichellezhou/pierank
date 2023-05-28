@@ -131,24 +131,70 @@ inline bool ConvertAndWriteUint64(std::ostream *os, SrcType src_val) {
   return ConvertAndWriteInteger<SrcType, uint64_t>(os, src_val);
 }
 
-template<typename OutputStreamType>
-bool WriteData(OutputStreamType *os, const char *str, uint64_t size);
+template<typename OutputStreamType, typename DataType = char>
+bool WriteData(OutputStreamType *os, const DataType *data, uint64_t size = 1);
 
 template<>
 inline bool
-WriteData<std::ostream>(std::ostream *os, const char *str, uint64_t size) {
-  return static_cast<bool>(os->write(str, size));
+WriteData<std::ostream, char>(std::ostream *os, const char *data,
+                              uint64_t size) {
+  return static_cast<bool>(os->write(data, size));
 }
 
 template<>
 inline bool
-WriteData<std::ofstream>(std::ofstream *ofs, const char *str, uint64_t size) {
-  return static_cast<bool>(ofs->write(str, size));
+WriteData<std::ofstream, char>(std::ofstream *ofs, const char *data,
+                               uint64_t size) {
+  return static_cast<bool>(ofs->write(data, size));
 }
 
 template<>
-inline bool WriteData<FILE>(FILE *fp, const char *str, uint64_t size) {
-  return fwrite(str, 1, size, fp) == size;
+inline bool WriteData<FILE, char>(FILE *fp, const char *data, uint64_t size) {
+  return fwrite(data, 1, size, fp) == size;
+}
+
+template<>
+inline bool
+WriteData<std::ostream, uint32_t>(std::ostream *os, const uint32_t *data,
+                                  uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, uint32_t>(std::ofstream *ofs, const uint32_t *data,
+                                   uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, uint32_t>(FILE *fp, const uint32_t *data, uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
+WriteData<std::ostream, uint64_t>(std::ostream *os, const uint64_t *data,
+                                  uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, uint64_t>(std::ofstream *ofs, const uint64_t *data,
+                                   uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, uint64_t>(FILE *fp, const uint64_t *data, uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
 }
 
 template<typename ValueType, typename OutputStreamType>
@@ -159,7 +205,8 @@ inline bool WriteInteger(OutputStreamType *os, ValueType val,
          (size < sizeof(ValueType) &&
           static_cast<uint64_t>(val) < 1ULL << size * 8));
   // Assumes little-endian machine!
-  return WriteData<OutputStreamType>(os, reinterpret_cast<char *>(&val), size);
+  return WriteData<OutputStreamType, char>(
+      os, reinterpret_cast<const char *>(&val), size);
 }
 
 template<typename OutputStreamType>
@@ -174,23 +221,66 @@ inline bool WriteUint64(OutputStreamType *os, uint64_t val,
   return WriteInteger<uint64_t, OutputStreamType>(os, val, size);
 }
 
-template<typename InputStreamType>
-bool ReadData(InputStreamType *is, char *str, uint64_t size);
+template<typename InputStreamType, typename DataType = char>
+bool ReadData(InputStreamType *is, DataType *data, uint64_t size = 1);
 
 template<>
-inline bool ReadData<std::istream>(std::istream *is, char *str, uint64_t size) {
-  return static_cast<bool>(is->read(str, size));
+inline bool
+ReadData<std::istream, char>(std::istream *is, char *data, uint64_t size) {
+  return static_cast<bool>(is->read(data, size));
 }
 
 template<>
 inline bool
-ReadData<std::ifstream>(std::ifstream *ifs, char *str, uint64_t size) {
-  return static_cast<bool>(ifs->read(str, size));
+ReadData<std::ifstream, char>(std::ifstream *ifs, char *data, uint64_t size) {
+  return static_cast<bool>(ifs->read(data, size));
 }
 
 template<>
-inline bool ReadData<FILE>(FILE *fp, char *str, uint64_t size) {
-  return fread(str, size, 1, fp) == size;
+inline bool ReadData<FILE, char>(FILE *fp, char *data, uint64_t size) {
+  return fread(data, 1, size, fp) == size;
+}
+
+template<>
+inline bool
+ReadData<std::istream, uint32_t>(std::istream *is, uint32_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
+                                    size * sizeof(*data)));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, uint32_t>(std::ifstream *ifs, uint32_t *data,
+                                  uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool ReadData<FILE, uint32_t>(FILE *fp, uint32_t *data, uint64_t size) {
+  return fread(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
+ReadData<std::istream, uint64_t>(std::istream *is, uint64_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
+                                    size * sizeof(*data)));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, uint64_t>(std::ifstream *ifs, uint64_t *data,
+                                  uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool ReadData<FILE, uint64_t>(FILE *fp, uint64_t *data, uint64_t size) {
+  return fread(data, sizeof(*data), size, fp) == size;
 }
 
 template<typename SrcType, typename DestType, typename InputStreamType>
@@ -201,8 +291,7 @@ inline DestType ReadAndConvertInteger(InputStreamType *is,
   SrcType src_val;
   if (offset)
     *offset += sizeof(src_val);
-  if (!ReadData<InputStreamType>(is, reinterpret_cast<char *>(&src_val),
-                                 sizeof(src_val)))
+  if (!ReadData<InputStreamType, SrcType>(is, &src_val, 1))
     return std::numeric_limits<DestType>::max();
   DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
   DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
@@ -229,7 +318,7 @@ inline ValueType ReadInteger(InputStreamType *is,
   ValueType val = 0;
   if (offset)
     *offset += size;
-  if (ReadData<InputStreamType>(is, reinterpret_cast<char *>(&val), size))
+  if (ReadData<InputStreamType, char>(is, reinterpret_cast<char *>(&val), size))
     return val;
   return std::numeric_limits<ValueType>::max();
 }
@@ -289,7 +378,7 @@ inline bool EatString(InputStreamType *is, absl::string_view str,
                       uint64_t *offset = nullptr) {
   auto size = str.size();
   auto buf = std::make_unique<char[]>(size);
-  if (ReadData<InputStreamType>(is, buf.get(), size)) {
+  if (ReadData<InputStreamType, char>(is, buf.get(), size)) {
     if (offset)
       *offset += size;
     return str == absl::string_view(buf.get(), size);
