@@ -249,6 +249,65 @@ public:
     return !(lhs == rhs);
   }
 
+  // Returns (-1, 0) if index values are not monotonically increasing.
+  std::pair<uint64_t, uint32_t>  // <encode_size, new_item_size>
+  EncodeSizeWithSketch(uint32_t sketch_bits) const {
+    if (num_items_ == 0) return std::make_pair(0, 0);
+
+    uint64_t items_per_sketch = 1ULL << sketch_bits;
+    T max_diff = 0;
+    for (uint64_t i = 0; i < num_items_; i += items_per_sketch) {
+      uint64_t sketch_end = std::min(i + items_per_sketch, num_items_ - 1);
+      if ((*this)[sketch_end] < (*this)[i])
+        return std::make_pair(std::numeric_limits<uint64_t>::max(), 0);
+      T diff = (*this)[sketch_end] - (*this)[i];
+      max_diff = std::max(max_diff, diff);
+    }
+
+    uint64_t sketches = UnsignedDivideCeil(num_items_, items_per_sketch);
+    uint32_t new_item_size = MinEncode(max_diff);
+    return std::make_pair(num_items_ * new_item_size + sketches * sizeof(T),
+                          new_item_size);
+  }
+
+  inline uint64_t SketchItems(uint32_t sketch_bits) const {
+    uint64_t items_per_sketch = 1ULL << sketch_bits;
+    return UnsignedDivideCeil(num_items_, items_per_sketch);
+  }
+
+  uint32_t FindBestSketchBits() const {
+    auto [min_item_size, shift_by_min_val] = MinEncode();
+    if (min_item_size == 1) return 0;  // minimal size achieved without sketch
+
+    uint64_t min_encode_size = std::numeric_limits<uint64_t>::max();
+    uint32_t best_sketch_bits = 0;
+    // For sketch compression to save memory, it must:
+    // #items * new_item_size + #sketches * sizeof(T) < #items * item_size
+    // so, #sketches * sizeof(T) < #items * (item_size - new_item_size)
+    // since new_item_size >= 1, item_size - new_item_size <= item_size - 1
+    // Thus, we have:  #sketches < #items * (item_size - 1) / sizeof(T)
+    // Also, trivially we have: #sketches >= 2.
+    // In summary, # of sketch items must satisfy the following inequalities:
+    // 2 <= #sketches < #items * (item_size - 1) / sizeof(T)
+    uint64_t max_sketches =
+        UnsignedDivideCeil(num_items_ * (item_size_ - 1), sizeof(T));
+    for (uint32_t sketch_bits = 1; sketch_bits < 64; ++sketch_bits) {
+      uint64_t sketches = SketchItems(sketch_bits);
+      if (sketches >= max_sketches) continue;
+      if (sketches < 2) break;
+      auto [encode_size, new_item_size] = EncodeSizeWithSketch(sketch_bits);
+      DCHECK_GT(encode_size, 0);
+      if (encode_size == std::numeric_limits<uint64_t>::max())
+        return 0;  // index values are not monotonic -> cannot use any sketch
+      if (encode_size < min_encode_size) {
+        min_encode_size = encode_size;
+        best_sketch_bits = sketch_bits;
+      }
+    }
+    DCHECK_LT(best_sketch_bits, 64);
+    return best_sketch_bits;
+  }
+
   bool WriteAllButValues(std::ostream *os, uint32_t item_size,
                          bool shift_by_min_value) const {
     if (!WriteUint32(os, item_size)) return false;
@@ -369,7 +428,7 @@ public:
     sketch_bits_ = ReadUint32(is, offset);
     CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
     CHECK_LT(sketch_bits_, 8 * sizeof(T));
-    sketch_bit_mask_= static_cast<uint64_t>(-1) << sketch_bits_;
+    sketch_bit_mask_= (1ULL << sketch_bits_) - 1;
     if (!ReadSketch(is, offset))
       return absl::InternalError("Error reading sketch");
     CHECK_NE(sketch_bits_ > 0, sketch_.empty());
@@ -459,7 +518,7 @@ private:
   T max_val_ = std::numeric_limits<T>::min();
   uint64_t num_items_ = 0;
   uint32_t sketch_bits_ = 0;
-  uint64_t sketch_bit_mask_ = static_cast<uint64_t>(-1);
+  uint64_t sketch_bit_mask_ = 0;
   std::vector<T> sketch_;
   std::string vals_;
   mio::mmap_source vals_mmap_;

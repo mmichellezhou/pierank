@@ -33,6 +33,30 @@ inline uint32_t MinEncodeSize(uint64_t max_value) {
   else return 8;
 }
 
+inline uint32_t Log2Floor32(uint32_t n) {
+  if (n == 0) return -1;
+  uint32_t log = 0;
+  uint32_t value = n;
+  for (int i = 4; i >= 0; --i) {
+    int shift = (1 << i);
+    uint32_t x = value >> shift;
+    if (x != 0) {
+      value = x;
+      log += shift;
+    }
+  }
+  DCHECK_EQ(value, 1);
+  return log;
+}
+
+inline uint32_t Log2Floor64(uint64_t n) {
+  const uint32_t top_bits = static_cast<uint32_t>(n >> 32);
+  if (top_bits == 0)
+    return Log2Floor32(static_cast<uint32_t>(n));
+  else
+    return 32 + Log2Floor32(top_bits);
+}
+
 }  // namespace pierank
 
 #endif //PIERANK_MATH_UTILS_H_
