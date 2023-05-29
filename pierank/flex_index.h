@@ -265,22 +265,26 @@ public:
     }
 
     uint64_t sketches = UnsignedDivideCeil(num_items_, items_per_sketch);
-    uint32_t new_item_size = MinEncode(max_diff);
+    auto [new_item_size, shift_by_min_val] = MinEncode(max_diff);
     return std::make_pair(num_items_ * new_item_size + sketches * sizeof(T),
                           new_item_size);
   }
 
   inline uint64_t SketchItems(uint32_t sketch_bits) const {
+    if (!sketch_bits) return 0;
     uint64_t items_per_sketch = 1ULL << sketch_bits;
     return UnsignedDivideCeil(num_items_, items_per_sketch);
   }
 
-  uint32_t FindBestSketchBits() const {
-    auto [min_item_size, shift_by_min_val] = MinEncode();
-    if (min_item_size == 1) return 0;  // minimal size achieved without sketch
+  std::pair<uint32_t, uint32_t> // <sketch_bits, new_item_size>
+  FindBestSketchBits() const {
+    auto [new_item_size, shift_by_min_val] = MinEncode();
+    if (new_item_size == 1)  // minimal size achieved without sketch
+      return std::make_pair(0, new_item_size);
 
-    uint64_t min_encode_size = std::numeric_limits<uint64_t>::max();
+    uint64_t min_encode_size = num_items_ * new_item_size;
     uint32_t best_sketch_bits = 0;
+    uint32_t min_item_size = new_item_size;
     // For sketch compression to save memory, it must:
     // #items * new_item_size + #sketches * sizeof(T) < #items * item_size
     // so, #sketches * sizeof(T) < #items * (item_size - new_item_size)
@@ -295,55 +299,60 @@ public:
       uint64_t sketches = SketchItems(sketch_bits);
       if (sketches >= max_sketches) continue;
       if (sketches < 2) break;
-      auto [encode_size, new_item_size] = EncodeSizeWithSketch(sketch_bits);
+      auto [encode_size, item_size] = EncodeSizeWithSketch(sketch_bits);
       DCHECK_GT(encode_size, 0);
-      if (encode_size == std::numeric_limits<uint64_t>::max())
-        return 0;  // index values are not monotonic -> cannot use any sketch
+      if (encode_size == std::numeric_limits<uint64_t>::max()) {
+        // index values are not monotonic -> cannot use any sketch
+        return std::make_pair(0, new_item_size);
+      }
       if (encode_size < min_encode_size) {
         min_encode_size = encode_size;
         best_sketch_bits = sketch_bits;
+        min_item_size = item_size;
       }
     }
     DCHECK_LT(best_sketch_bits, 64);
-    return best_sketch_bits;
+    DCHECK_LE(min_item_size, new_item_size);
+    return std::make_pair(best_sketch_bits, min_item_size);
   }
 
-  bool WriteAllButValues(std::ostream *os, uint32_t item_size,
-                         bool shift_by_min_value) const {
+  bool
+  WriteAllButValues(std::ostream *os, uint32_t item_size,
+                    bool shift_by_min_value, uint32_t sketch_bits = 0) const {
     if (!WriteUint32(os, item_size)) return false;
     if (!ConvertAndWriteUint32(os, shift_by_min_value)) return false;
     CHECK(shift_by_min_val_ == shift_by_min_value || shift_by_min_value);
     if (!ConvertAndWriteUint64(os, min_val_)) return false;
     if (!ConvertAndWriteUint64(os, max_val_)) return false;
 
-    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
-    CHECK_LT(sketch_bits_, 8 * sizeof(T));
-    CHECK_NE(sketch_bits_ > 0, sketch_.empty());
-    if (!WriteUint32(os, sketch_bits_)) return false;
-    if (!WriteSketch(os)) return false;
+    if (!WriteUint32(os, sketch_bits)) return false;
+    if (!WriteSketch(os, sketch_bits)) return false;
 
     return true;
   }
 
   template<typename OutputStreamType>
   bool WriteValues(OutputStreamType *os, uint32_t item_size,
-                   bool shift_by_min_value) const {
+                   bool shift_by_min_value, uint32_t sketch_bits = 0) const {
     if (!WriteUint64(os, item_size * num_items_)) return false;
-    int shift;
-    if (ShiftByMinValue() == shift_by_min_value)
-      shift = 0;
-    else if (shift_by_min_value)
-      shift = -1;
-    else
-      shift = 1;
+
+    T sketch;
+    uint64_t sketch_bit_mask = (1ULL << sketch_bits) - 1;
     for (uint64_t i = 0; i < num_items_; ++i) {
       T val = (*this)[i];
-      if (shift < 0) {
+      if (shift_by_min_value) {
         DCHECK_GE(val, min_val_);
         val -= min_val_;
-      } else if (shift > 0) {
-        DCHECK_LE(val, std::numeric_limits<T>::max() - min_val_);
-        val += min_val_;
+      }
+      if (sketch_bits) {
+        if (i & sketch_bit_mask) {
+          DCHECK_GE(val, sketch);
+          val -= sketch;
+        }
+        else {
+          sketch = val;
+          val = 0;
+        }
       }
       if (!WriteInteger(os, val, item_size)) return false;
     }
@@ -373,15 +382,30 @@ public:
     return true;
   }
 
-  template<typename OutputStreamType>
-  bool WriteSketch(OutputStreamType *os) const {
+  inline void CheckSketchBits() const {
     CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
     CHECK_LT(sketch_bits_, 8 * sizeof(T));
     CHECK_NE(sketch_bits_ > 0, sketch_.empty());
+  }
 
-    if (!WriteUint64(os, sketch_.size())) return false;
-    return sketch_.empty() ? true :
-           WriteData<OutputStreamType, T>(os, sketch_.data(), sketch_.size());
+  template<typename OutputStreamType>
+  bool WriteSketch(OutputStreamType *os, uint32_t sketch_bits) const {
+    CheckSketchBits();  // NOTE: This has nothing to do with `sketch_bits`.
+
+    CHECK_LT(sketch_bits, 8 * sizeof(T));
+    uint64_t sketches = SketchItems(sketch_bits);
+    CHECK_EQ(sketch_bits == sketch_bits_, sketch_.size() == sketches);
+
+    if (!WriteUint64(os, sketches)) return false;
+    if (sketches == 0) return true;
+    if (sketch_bits == sketch_bits_)
+      return WriteData<OutputStreamType, T>(os, sketch_.data(), sketch_.size());
+
+    uint64_t items_per_sketch = 1ULL << sketch_bits;
+    for (uint64_t i = 0; i < num_items_; i += items_per_sketch)
+      if (!WriteInteger(os, (*this)[i])) return false;
+
+    return true;
   }
 
   template<typename InputStreamType>
@@ -391,18 +415,17 @@ public:
     sketch_.resize(size);
     if (offset)
       *offset += size * sizeof(T);
-    CHECK(sketch_bits_ == 0 || item_size_ < sizeof(T));
-    CHECK_LT(sketch_bits_, 8 * sizeof(T));
-    CHECK_EQ(sketch_bits_ > 0, size > 0);
+    CheckSketchBits();
 
     return size ? ReadData<InputStreamType, T>(is, sketch_.data(), size) : true;
   }
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
-    auto [min_item_size, shift_by_min_val] = index.MinEncode();
-    if (!index.WriteAllButValues(&os, min_item_size, shift_by_min_val))
+    auto[new_item_size, shift_by_min_val] = index.MinEncode();
+    auto [sketch_bits, item_size] = index.FindBestSketchBits();
+    if (!index.WriteAllButValues(&os, item_size, shift_by_min_val, sketch_bits))
       return os;
-    if (!index.WriteValues(&os, min_item_size, shift_by_min_val))
+    if (!index.WriteValues(&os, item_size, shift_by_min_val, sketch_bits))
       return os;
     return os;
   }

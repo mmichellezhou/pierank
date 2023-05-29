@@ -85,7 +85,7 @@ protected:
     SparseMatrix<uint32_t, uint64_t> mat;
     uint32_t index_dim = IndexDimInPieRankMatrixPath(file_path);
     EXPECT_OK(mat.ReadPieRankMatrixFile(file_path));
-    EXPECT_EQ(mat.Index().ItemSize(), 2);
+    EXPECT_EQ(mat.Index().ItemSize(), 1);
     EXPECT_EQ(mat.Pos().ItemSize(), 1);
     EXPECT_EQ(mat.IndexDim(), index_dim);
     CHECK_LT(index_dim, 2);
