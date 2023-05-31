@@ -140,7 +140,7 @@ public:
 
     auto *ptr = Data();
     ptr += idx * item_size_;
-    T res;
+    T res = 0;
     PRK_MEMCPY(&res, ptr, item_size_);
 
     if (sketch_bits_) {
