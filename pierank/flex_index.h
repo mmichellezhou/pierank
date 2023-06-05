@@ -276,11 +276,11 @@ public:
     return UnsignedDivideCeil(num_items_, items_per_sketch);
   }
 
-  std::pair<uint32_t, uint32_t> // <sketch_bits, new_item_size>
-  FindBestSketchBits() const {
+  std::tuple<uint32_t, uint32_t, bool> // <sketch_bits, item_size, shift_min>
+  FindBestEncoding() const {
     auto [new_item_size, shift_by_min_val] = MinEncode();
     if (new_item_size == 1)  // minimal size achieved without sketch
-      return std::make_pair(0, new_item_size);
+      return std::make_tuple(0, new_item_size, shift_by_min_val);
 
     uint64_t min_encode_size = num_items_ * new_item_size;
     uint32_t best_sketch_bits = 0;
@@ -303,7 +303,7 @@ public:
       DCHECK_GT(encode_size, 0);
       if (encode_size == std::numeric_limits<uint64_t>::max()) {
         // index values are not monotonic -> cannot use any sketch
-        return std::make_pair(0, new_item_size);
+        return std::make_tuple(0, new_item_size, shift_by_min_val);
       }
       if (encode_size < min_encode_size) {
         min_encode_size = encode_size;
@@ -313,11 +313,12 @@ public:
     }
     DCHECK_LT(best_sketch_bits, 64);
     DCHECK_LE(min_item_size, new_item_size);
-    return std::make_pair(best_sketch_bits, min_item_size);
+    return std::make_tuple(best_sketch_bits, min_item_size, shift_by_min_val);
   }
 
+  template<typename OutputStreamType>
   bool
-  WriteAllButValues(std::ostream *os, uint32_t item_size,
+  WriteAllButValues(OutputStreamType *os, uint32_t item_size,
                     bool shift_by_min_value, uint32_t sketch_bits = 0) const {
     if (!WriteUint32(os, item_size)) return false;
     if (!ConvertAndWriteUint32(os, shift_by_min_value)) return false;
@@ -408,6 +409,16 @@ public:
     return true;
   }
 
+  template<typename OutputStreamType>
+  absl::Status Write(OutputStreamType *os) const {
+   auto [sketch_bits, item_size, shift_by_min_val] = FindBestEncoding();
+    if (!WriteAllButValues(os, item_size, shift_by_min_val, sketch_bits))
+      return absl::InternalError("Error writing all but values");
+    if (!WriteValues(os, item_size, shift_by_min_val, sketch_bits))
+      return absl::InternalError("Error writing values");
+    return absl::OkStatus();
+  }
+
   template<typename InputStreamType>
   bool ReadSketch(InputStreamType *is, uint64_t *offset = nullptr) {
     auto size = ReadUint64(is, offset);
@@ -421,12 +432,9 @@ public:
   }
 
   friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
-    auto[new_item_size, shift_by_min_val] = index.MinEncode();
-    auto [sketch_bits, item_size] = index.FindBestSketchBits();
-    if (!index.WriteAllButValues(&os, item_size, shift_by_min_val, sketch_bits))
-      return os;
-    if (!index.WriteValues(&os, item_size, shift_by_min_val, sketch_bits))
-      return os;
+    auto status = index.Write(&os);
+    if (!status.ok())
+      os << status.message();
     return os;
   }
 
