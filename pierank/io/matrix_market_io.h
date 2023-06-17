@@ -18,9 +18,13 @@ namespace pierank {
 class MatrixMarketIo {
 public:
   enum class MatrixType {
-    kPatternNone,
+    kUnknown,
+    kIntegerGeneral,
+    kIntegerSymmetric,
     kPatternGeneral,
-    kPatternSymmetric
+    kPatternSymmetric,
+    kRealGeneral,
+    kRealSymmetric,
   };
 
   inline static bool HasMtxFileExtension(absl::string_view path) {
@@ -29,8 +33,8 @@ public:
 
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
     if (static_cast<bool>(is_)) {
-      matrix_type_ = CheckBanner();
-      if (matrix_type_ != MatrixType::kPatternNone) {
+      matrix_type_ = ReadBanner();
+      if (matrix_type_ != MatrixType::kUnknown) {
         SkipComments();
         is_ >> rows_ >> cols_ >> nnz_;
       }
@@ -49,20 +53,26 @@ public:
     }
   }
 
-  MatrixType CheckBanner() {
-    std::vector<std::string> words = {"%%MatrixMarket", "matrix", "coordinate",
-                                      "pattern"};
-    MatrixType res = MatrixType::kPatternNone;
-    std::string str;
+  MatrixType ReadBanner() {
+    std::vector<std::string> words = {"%%MatrixMarket", "matrix", "coordinate"};
+    MatrixType res = MatrixType::kUnknown;
     for (const auto &word : words) {
+      std::string str;
       is_ >> str;
       if (str != word) return res;
     }
-    is_ >> str;
-    if (str == "general")
-      res = MatrixType::kPatternGeneral;
-    else if (str == "symmetric")
-      res = MatrixType::kPatternSymmetric;
+    std::string dtype, subtype;
+    is_ >> dtype >> subtype;
+    if (dtype == "integer") {
+      if (subtype == "general") res = MatrixType::kIntegerGeneral;
+      else if (subtype == "symmetric") res = MatrixType::kIntegerSymmetric;
+    } else if (dtype == "pattern") {
+      if (subtype == "general") res = MatrixType::kPatternGeneral;
+      else if (subtype == "symmetric") res = MatrixType::kPatternSymmetric;
+    } else if (dtype == "real") {
+      if (subtype == "general") res = MatrixType::kRealGeneral;
+      else if (subtype == "symmetric") res = MatrixType::kRealSymmetric;
+    }
     is_.ignore();  // skip the new line character
     return res;
   }
@@ -86,14 +96,14 @@ public:
     return matrix_type_ == MatrixType::kPatternSymmetric;
   }
 
-  bool Ok() const { return matrix_type_ != MatrixType::kPatternNone; }
+  bool Ok() const { return matrix_type_ != MatrixType::kUnknown; }
 
 private:
   uint32_t rows_;
   uint32_t cols_;
   uint64_t nnz_;
   std::ifstream is_;
-  MatrixType matrix_type_ = MatrixType::kPatternNone;
+  MatrixType matrix_type_ = MatrixType::kUnknown;
   uint64_t count_ = 0;
 };
 
