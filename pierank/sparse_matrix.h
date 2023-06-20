@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <limits>
 #include <numeric>
+#include <vector>
 #include <glog/logging.h>
 
 #include "absl/status/status.h"
@@ -92,7 +93,8 @@ inline uint32_t IndexDimInPieRankMatrixPath(absl::string_view prm_path) {
    * pos = [2, 4, 0, 2, 0, 3, 1, 2, 2]
    * idx = [0, 2, 4, 6, 8, 9]
    */
-template<typename PosType, typename IdxType>
+template<typename PosType, typename IdxType,
+    typename ValueContainerType = std::vector<double>>
 class SparseMatrix {
 public:
   // <min_pos, max_pos, nnz>
@@ -107,7 +109,10 @@ public:
 
   using FlexPosType = FlexIndex<PosType>;
 
-  using UniquePtr = std::unique_ptr<SparseMatrix<PosType, IdxType>>;
+  using ValueType = typename ValueContainerType::value_type;
+
+  using UniquePtr =
+      std::unique_ptr<SparseMatrix<PosType, IdxType, ValueContainerType>>;
 
   using UniqueIdxPtr = std::unique_ptr<FlexIdxType>;
 
@@ -127,6 +132,10 @@ public:
   SparseMatrix(const SparseMatrix &) = delete;
 
   SparseMatrix &operator=(const SparseMatrix &) = delete;
+
+  ValueType At(PosType pos1, PosType pos2) const;
+
+  ValueType At(IdxType index) const { return values_[index]; }
 
   const FlexIdxType &Index() const { return index_; }
 
@@ -149,7 +158,7 @@ public:
 
   PosType MaxDimSize() const { return std::max(rows_, cols_); }
 
-  bool Symmetric() const { return symmetric_; }
+  const MatrixType &Type() const { return type_; }
 
   uint32_t IndexDim() const { return index_dim_; }
 
@@ -162,7 +171,7 @@ public:
     if (lhs.rows_ != rhs.rows_) return false;
     if (lhs.cols_ != rhs.cols_) return false;
     if (lhs.nnz_ != rhs.nnz_) return false;
-    if (lhs.symmetric_ != rhs.symmetric_) return false;
+    if (lhs.type_ != rhs.type_) return false;
     if (lhs.index_dim_ != rhs.index_dim_) return false;
     if (lhs.index_ != rhs.index_) return false;
     if (lhs.pos_ != rhs.pos_) return false;
@@ -174,7 +183,8 @@ public:
     ConvertAndWriteUint64(os, rows_);
     ConvertAndWriteUint64(os, cols_);
     ConvertAndWriteUint64(os, nnz_);
-    ConvertAndWriteUint32(os, symmetric_);
+    auto status = type_.Write(os);
+    if (!status.ok()) *os << status.message();
     WriteUint32(os, index_dim_);
     *os << index_;
   }
@@ -193,8 +203,11 @@ public:
       rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
       cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
-      symmetric_ = ReadUint32AndConvert<bool>(&is, &offset);
+      auto status = type_.Read(&is, &offset);
+      if (!status.ok())
+        LOG(FATAL) << status.message();
       index_dim_ = ReadUint32(&is, &offset);
+      CHECK_LT(index_dim_, 2);
       if (!is)
         status_.Update(absl::InternalError("Error read PRM file header"));
     } else
@@ -250,29 +263,49 @@ public:
     DCHECK_LE(bytes_per_pos, sizeof(PosType));
     DCHECK_LE(bytes_per_idx, sizeof(IdxType));
     MatrixMarketIo mat(path);
-    if (!mat.Ok()) {
+    if (!mat.ok()) {
       status_ = absl::InternalError(absl::StrCat("Fail to open file: ", path));
       return status_;
     }
 
     rows_ = mat.Rows();
     cols_ = mat.Cols();
-    symmetric_ = mat.Symmetric();
+    type_ = mat.Type();
     index_dim_ = 1;  // Matrix Market file is column-major
     PosType prev_col = static_cast<PosType>(-1);
+    bool is_integer_matrix = mat.Type().IsInteger();
+    bool is_real_matrix = mat.Type().IsReal();
+    bool is_complex_matrix = mat.Type().IsComplex();
     while (mat.HasNext()) {
-      auto pos = mat.Next();
-      DCHECK_GT(pos.first, 0);
-      DCHECK_GT(pos.second, 0);
-      --pos.first;
-      --pos.second;
-      while (prev_col != pos.second) {
+      auto [first, second, var] = mat.Next();
+      DCHECK_GT(first, 0);
+      DCHECK_GT(second, 0);
+      --first;
+      --second;
+      while (prev_col != second) {
         index_.Append(nnz_);
         ++prev_col;
-        DCHECK_LE(prev_col, pos.second);
+        DCHECK_LE(prev_col, second);
         DCHECK_EQ(index_[prev_col], nnz_);
       }
-      pos_.Append(pos.first);
+      pos_.Append(first);
+      if (is_integer_matrix) {
+        DCHECK_LE(std::get<int64_t>(var),
+                  std::numeric_limits<ValueType>::max());
+        DCHECK_GE(std::get<int64_t>(var),
+                  std::numeric_limits<ValueType>::min());
+        values_.push_back(std::get<int64_t>(var));
+      } else if (is_real_matrix) {
+        DCHECK_LE(std::get<double>(var), std::numeric_limits<ValueType>::max());
+        DCHECK_GE(std::get<double>(var), std::numeric_limits<ValueType>::min());
+        values_.push_back(std::get<double>(var));
+      } else if (is_complex_matrix) {
+        if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
+          values_.push_back(std::get<std::complex<double>>(var));
+        } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
+          values_.push_back(std::get<std::complex<double>>(var));
+        }
+      }
       nnz_++;
     }
     index_.Append(nnz_);
@@ -452,12 +485,7 @@ public:
   absl::StatusOr<UniquePtr>
   ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
                  uint64_t max_nnz_per_thread = 8000000) const {
-    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
-    res->rows_ = rows_;
-    res->cols_ = cols_;
-    res->nnz_ = nnz_;
-    res->symmetric_ = symmetric_;
-    res->index_dim_ = index_dim_ ? 0 : 1;
+    auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
     auto nnz = CountNonIndexDimNnz();
     auto idx = CreateReverseIndex(*nnz);
@@ -468,6 +496,7 @@ public:
     auto offsets = RangeNnzOffsets(ranges);
     std::vector<UniquePosPtr> poses(ranges.size());
     nnz->Reset();
+
     if (ranges.size() == 1) {
       auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nnz.get());
       res->pos_ = std::move(*pos.release());
@@ -495,11 +524,7 @@ public:
   absl::StatusOr<UniquePtr> ChangeIndexDim(
       const std::string &path,
       uint64_t max_nnz_per_range = 64000000) const {
-    auto res = std::make_unique<SparseMatrix<PosType, IdxType>>();
-    res->rows_ = rows_;
-    res->cols_ = cols_;
-    res->nnz_ = nnz_;
-    res->index_dim_ = index_dim_ ? 0 : 1;
+    auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
     auto nnz = CountNonIndexDimNnz();
     auto idx = CreateReverseIndex(*nnz);
@@ -566,7 +591,7 @@ public:
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
-    absl::StrAppend(&res, tab, "symmetric: ", symmetric_, "\n");
+    absl::StrAppend(&res, tab, "type: \"", type_.ToShortString(), "\"\n");
     absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
     indent += 2;
     absl::StrAppend(&res, tab, "index {\n",
@@ -665,14 +690,29 @@ protected:
     return true;
   }
 
+  UniquePtr CopyOnlyDimInfo(bool change_index_dim = false) const {
+    auto res =
+        std::make_unique<SparseMatrix<PosType, IdxType, ValueContainerType>>();
+    res->rows_ = rows_;
+    res->cols_ = cols_;
+    res->nnz_ = nnz_;
+    res->type_ = type_;
+    if (change_index_dim)
+      res->index_dim_ = index_dim_ ? 0 : 1;
+    else
+      res->index_dim_ = index_dim_;
+    return res;
+  }
+
 private:
   PosType rows_ = 0;
   PosType cols_ = 0;
   IdxType nnz_ = 0;
-  bool symmetric_ = false;
+  MatrixType type_;
   uint32_t index_dim_ = 0;
   FlexIdxType index_;
   FlexPosType pos_;
+  ValueContainerType values_;
 };
 
 }  // namespace pierank

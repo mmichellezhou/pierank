@@ -13,7 +13,7 @@ using namespace pierank;
 TEST(MatrixMarketIo, ReadHeaderAsh219) {
   auto file_path = TestDataFilePath("ash219.mtx");
   MatrixMarketIo mm(file_path);
-  EXPECT_TRUE(mm.Ok());
+  EXPECT_TRUE(mm.ok());
   EXPECT_EQ(mm.Rows(), 219);
   EXPECT_EQ(mm.Cols(), 85);
   EXPECT_EQ(mm.NumNonZeros(), 438);
