@@ -11,10 +11,10 @@ using namespace pierank;
 
 TEST(FlexIndex, AddElems) {
   FlexIndex<uint32_t> index(3);
-  index.Append(123);
+  index.push_back(123);
   EXPECT_EQ(index[0], 123);
-  index.Append(234);
+  index.push_back(234);
   EXPECT_EQ(index[1], 234);
-  index.Append(345);
+  index.push_back(345);
   EXPECT_EQ(index[2], 345);
 }

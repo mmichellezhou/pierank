@@ -20,6 +20,7 @@
 
 #include "pierank/flex_index.h"
 #include "pierank/math_utils.h"
+#include "pierank/string_utils.h"
 #include "pierank/thread_pool.h"
 #include "pierank/io/file_utils.h"
 #include "pierank/io/matrix_market_io.h"
@@ -143,7 +144,7 @@ public:
 
   // Returns the pos AFTER the max index pos.
   const PosType IndexPosEnd() const {
-    return static_cast<PosType>(index_.NumItems() - 1);
+    return static_cast<PosType>(index_.size() - 1);
   }
 
   const FlexPosType &Pos() const { return pos_; }
@@ -283,12 +284,12 @@ public:
       --first;
       --second;
       while (prev_col != second) {
-        index_.Append(nnz_);
+        index_.push_back(nnz_);
         ++prev_col;
         DCHECK_LE(prev_col, second);
         DCHECK_EQ(index_[prev_col], nnz_);
       }
-      pos_.Append(first);
+      pos_.push_back(first);
       if (is_integer_matrix) {
         DCHECK_LE(std::get<int64_t>(var),
                   std::numeric_limits<ValueType>::max());
@@ -308,7 +309,7 @@ public:
       }
       nnz_++;
     }
-    index_.Append(nnz_);
+    index_.push_back(nnz_);
     return absl::OkStatus();
   }
 
@@ -340,20 +341,20 @@ public:
 
   static PosRanges
   SplitIndexDimByPos(const FlexIdxType &index, uint32_t num_ranges) {
-    if (index.NumItems() == 0)
+    if (index.size() == 0)
       return {std::make_tuple(0, 0, 0)};
-    return SplitPosIntoRanges(index.NumItems() - 1, num_ranges);
+    return SplitPosIntoRanges(index.size() - 1, num_ranges);
   }
 
   // Returned PosRanges.size() may be less than max_ranges.
   static PosRanges SplitIndexDimByNnz(const FlexIdxType &index, IdxType nnz,
                                       uint32_t max_ranges) {
     DCHECK_GT(max_ranges, 0);
-    if (index.NumItems() == 0) {
+    if (index.size() == 0) {
       DCHECK_EQ(nnz, 0);
       return {std::make_tuple(0, 0, 0)};
     }
-    PosType num_index_pos = index.NumItems() - 1;
+    PosType num_index_pos = index.size() - 1;
     if (max_ranges == 1)
       return {std::make_tuple(0, num_index_pos, nnz)};
     PosRanges res;
@@ -436,12 +437,12 @@ public:
     IdxType nnz = 0;
     PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
     for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
-      res->Append(nnz);
+      res->push_back(nnz);
       nnz += nbr[p];
     }
     DCHECK_EQ(nnz, nnz_);
-    if ((*res)[res->NumItems() - 1] != nnz)
-      res->Append(nnz);
+    if ((*res)[res->size() - 1] != nnz)
+      res->push_back(nnz);
 
     return res;
   }
@@ -544,7 +545,7 @@ public:
       auto[fp, tmp_path] = OpenTmpFile(path);
       DCHECK(fp);
       tmp_pos_infos.push_back(
-          std::make_tuple(pos->NumItems(), pos->ItemSize(), tmp_path));
+          std::make_tuple(pos->size(), pos->ItemSize(), tmp_path));
       if (!pos->WriteValues(fp, pos->ItemSize(), /*shift_by_min_val=*/false))
         return absl::InternalError("Error write file: " + tmp_path);
       fclose(fp);
@@ -571,7 +572,7 @@ public:
       if (!tmp_file_or.ok()) return tmp_file_or.status();
       FlexPosType pos(pos_item_size, tmp_pos_items);
       pos.ReadValues(&*tmp_file_or, tmp_pos_item_size, pos_value_shift);
-      DCHECK_EQ(pos.NumItems(), tmp_pos_items);
+      DCHECK_EQ(pos.size(), tmp_pos_items);
       WriteData(&ofs, pos.Data(), pos_item_size * tmp_pos_items);
       std::remove(tmp_pos_path.c_str());
     }
@@ -599,6 +600,8 @@ public:
     absl::StrAppend(&res, tab, "}\n");
     absl::StrAppend(&res, tab, "pos {\n", pos_.DebugString(max_items, indent));
     absl::StrAppend(&res, tab, "}\n");
+    absl::StrAppend(&res, tab, "values: ", VectorToString(values_, max_items));
+    absl::StrAppend(&res, "\n");
 
     return res;
   }

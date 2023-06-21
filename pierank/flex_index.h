@@ -78,7 +78,7 @@ public:
 
   bool HasSketch() const { return sketch_bits_ > 0; }
 
-  void Append(T val) {
+  void push_back(T val) {
     DCHECK(vals_mmap_.empty());
     std::size_t old_size = vals_.size();
     vals_.resize(old_size + item_size_);
@@ -195,7 +195,8 @@ public:
 
   uint32_t ItemSize() const { return item_size_; }
 
-  uint64_t Size() const {
+  // Returns the # of bytes to store the items.
+  uint64_t Bytes() const {
     if (vals_.size()) {
       DCHECK(vals_mmap_.empty());
       return vals_.size();
@@ -203,10 +204,11 @@ public:
     return vals_mmap_.size();
   }
 
-  inline uint64_t NumItems() const {
+  // Returns the # of items stored.
+  inline std::size_t size() const {
     DCHECK_GT(item_size_, 0);
-    DCHECK_EQ(Size() % item_size_, 0);
-    DCHECK_EQ(num_items_, Size() / item_size_);
+    DCHECK_EQ(Bytes() % item_size_, 0);
+    DCHECK_EQ(num_items_, Bytes() / item_size_);
     return num_items_;
   }
 
@@ -234,9 +236,9 @@ public:
   friend bool operator==(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
     CHECK_EQ(lhs.shift_by_min_val_, rhs.shift_by_min_val_) << "Not supported";
     if (lhs.num_items_ != rhs.num_items_) return false;
-    if (lhs.item_size_ == rhs.item_size_ && lhs.Size() == rhs.Size()
+    if (lhs.item_size_ == rhs.item_size_ && lhs.Bytes() == rhs.Bytes()
         && lhs.sketch_bits_ == rhs.sketch_bits_) {
-      return memcmp(lhs.Data(), rhs.Data(), lhs.Size()) == 0;
+      return memcmp(lhs.Data(), rhs.Data(), lhs.Bytes()) == 0;
     }
 
     for (uint64_t i = 0; i < lhs.num_items_; ++i) {
@@ -527,17 +529,8 @@ public:
       absl::StrAppend(&res, "...");
     }
     absl::StrAppend(&res, "]\n");
-    absl::StrAppend(&res, tab, "vals: [");
-    uint64_t max_value_items = std::min(num_items_, max_items);
-    for (uint64_t i = 0; i < max_value_items; ++i) {
-      if (i > 0) absl::StrAppend(&res, ", ");
-      absl::StrAppend(&res, (*this)[i]);
-    }
-    if (max_value_items < num_items_) {
-      if (max_value_items > 0) absl::StrAppend(&res, ", ");
-      absl::StrAppend(&res, "...");
-    }
-    absl::StrAppend(&res, "]\n");
+    absl::StrAppend(&res, tab, "vals: ", VectorToString(*this, max_items));
+    absl::StrAppend(&res, "\n");
 
     return res;
   }
