@@ -89,7 +89,7 @@ public:
 
   MatrixType(Value value) : val_(value) {}
 
-  MatrixType(absl::string_view str) : val_(FromString(str)) {}
+  MatrixType(absl::string_view str) : val_(FromShortString(str)) {}
 
   inline bool IsPattern() const {
     return val_ == kCoordinatePatternGeneral ||
