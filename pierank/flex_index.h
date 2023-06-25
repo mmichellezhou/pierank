@@ -48,6 +48,128 @@ namespace pierank {
 template<typename T>
 class FlexIndex {
 public:
+  struct Iterator {
+    using iterator_category = std::random_access_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = T;
+    using pointer           = const FlexIndex<T> *;  // not the ordinary T*
+    using reference         = void;  // not the ordinary T&
+
+    Iterator() = default;
+
+    Iterator(const Iterator &rhs) = default;
+
+    Iterator(const FlexIndex<T> &index, uint64_t idx) :
+        index_(&index), idx_(idx),
+        ptr_(index_->Data() + idx * index_->item_size_) {}
+
+    inline value_type operator*() const { return (*index_)[idx_]; }
+
+    // NOTE: Not the ordinary -> operator semantics, use with care !!!
+    inline pointer operator->() const { return index_; }
+
+    inline value_type operator[](difference_type rhs) const {
+      return (*index_)[idx_ + rhs];
+    }
+
+    inline Iterator &operator++() {
+      ++idx_;
+      ptr_ += index_->item_size_;
+      return *this;
+    }
+
+    inline Iterator operator++(int) {
+      Iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    inline Iterator &operator+=(difference_type rhs) {
+      idx_ += rhs;
+      ptr_ += rhs * index_->item_size_;
+      return *this;
+    }
+
+    inline Iterator operator+(difference_type rhs) const {
+      return Iterator(*index_, idx_ + rhs);
+    }
+
+    friend inline Iterator operator+(difference_type lhs, const Iterator &rhs) {
+      return Iterator(*rhs.index_, lhs + rhs.idx_);
+    }
+
+    inline Iterator &operator--() {
+      --idx_;
+      ptr_ -= index_->item_size_;
+      return *this;
+    }
+
+    inline Iterator operator--(int) {
+      Iterator tmp = *this;
+      --(*this);
+      return tmp;
+    }
+
+    inline Iterator& operator-=(difference_type rhs) {
+      idx_ -= rhs;
+      ptr_ -= rhs * index_->item_size_;
+      return *this;
+    }
+
+    inline Iterator operator-(difference_type rhs) const {
+      return Iterator(*index_, idx_ - rhs);
+    }
+
+    inline difference_type operator-(const Iterator &rhs) const {
+      DCHECK_EQ(index_, rhs.index_);
+      return idx_ - rhs.idx_;
+    }
+
+    friend inline Iterator operator-(difference_type lhs, const Iterator &rhs) {
+      return Iterator(*rhs.index_, lhs - rhs.idx_);
+    }
+
+    // Comparison operators
+    friend bool operator==(const Iterator& lhs, const Iterator& rhs) {
+      return (lhs.index_ == rhs.index_) && (lhs.idx_ == rhs.idx_);
+    }
+
+    friend bool operator!=(const Iterator& lhs, const Iterator& rhs) {
+      return !(lhs == rhs);
+    }
+
+    friend bool operator<(const Iterator& lhs, const Iterator& rhs) {
+      DCHECK_EQ(lhs.index_, rhs.index_);
+      return (lhs.idx_ < rhs.idx_);
+    }
+
+    friend bool operator>(const Iterator& lhs, const Iterator& rhs) {
+      DCHECK_EQ(lhs.index_, rhs.index_);
+      return (lhs.idx_ > rhs.idx_);
+    }
+
+    friend bool operator<=(const Iterator& lhs, const Iterator& rhs) {
+      DCHECK_EQ(lhs.index_, rhs.index_);
+      return (lhs.idx_ <= rhs.idx_);
+    }
+
+    friend bool operator>=(const Iterator& lhs, const Iterator& rhs) {
+      DCHECK_EQ(lhs.index_, rhs.index_);
+      return (lhs.idx_ >= rhs.idx_);
+    }
+
+  private:
+    const FlexIndex<T> *index_ = nullptr;
+    difference_type idx_ = 0;
+    const char *ptr_ = nullptr;
+  };
+
+  Iterator begin() const { return Iterator(*this, /*idx=*/0); }
+  Iterator end() const   { return Iterator(*this, /*idx=*/size()); }
+
+  Iterator cbegin() const { return Iterator(*this, /*idx=*/0); }
+  Iterator cend() const   { return Iterator(*this, /*idx=*/size()); }
+
   using SignedT = std::make_signed_t<T>;
 
   static std::pair<uint32_t, bool> MinEncode(T max_val, T min_val = 0) {
@@ -153,6 +275,8 @@ public:
     DCHECK_LE(res, max_val_) << "idx: " << idx;
     return res;
   }
+
+  auto operator()(uint64_t idx = 0) const { return Iterator(*this, idx); }
 
   void SetItemSize(uint32_t item_size) {
     DCHECK_GT(item_size, 0);
@@ -476,7 +600,7 @@ public:
   absl::Status Mmap(const std::string &path, uint64_t *offset) {
     auto file_or = OpenReadFile(path);
     if (!file_or.ok()) return file_or.status();
-    std::ifstream file = std::move(*file_or);
+    std::ifstream file = *std::move(file_or);
     if (!Seek(&file, *offset))
       return absl::InternalError(absl::StrCat("Error seeking file: ", path));
 

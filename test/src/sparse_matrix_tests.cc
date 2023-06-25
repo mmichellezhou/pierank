@@ -70,7 +70,7 @@ auto Transpose(const SparseMatrix <uint32_t, uint64_t> &mat) {
 
 }
 
-TEST(SparseMatrixTests, ReadMtxFile) {
+TEST(SparseMatrixTests, ReadAsh219MtxFile) {
   auto file_path = TestDataFilePath("ash219.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
@@ -149,3 +149,25 @@ INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, PieRankMatrixTestFixture,
     ::testing::Values(TestDataFilePath("ash219.i0.prm"),
                       TestDataFilePath("ash219.i1.prm"))
 );
+
+TEST(SparseMatrixTests, ReadB1ssMtxFile) {
+  auto file_path = TestDataFilePath("b1_ss.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  EXPECT_EQ(mat(0, 0), 0);
+  EXPECT_DOUBLE_EQ(mat(4, 0), -0.03599942);
+  EXPECT_DOUBLE_EQ(mat(5, 0), -0.0176371);
+  EXPECT_DOUBLE_EQ(mat(6, 0), -0.007721779);
+  EXPECT_DOUBLE_EQ(mat(0, 1), 1);
+  EXPECT_DOUBLE_EQ(mat(1, 1), -1);
+  EXPECT_DOUBLE_EQ(mat(6, 6), 1);
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t> mat0;
+  EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat0);
+}
