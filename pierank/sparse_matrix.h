@@ -142,10 +142,12 @@ public:
     PosType non_idx_pos;
     FlexPosIterator first, last;
     if (index_dim_ == 0) {
+      if (pos0 >= index_.size()) return 0;
       first = pos_(index_[pos0]);
       last = pos_(index_[pos0 + 1]);
       non_idx_pos = pos1;
     } else {
+      if (pos1 >= index_.size()) return 0;
       first = pos_(index_[pos1]);
       last = pos_(index_[pos1 + 1]);
       non_idx_pos = pos0;
@@ -318,12 +320,17 @@ public:
     bool is_integer_matrix = mat.Type().IsInteger();
     bool is_real_matrix = mat.Type().IsReal();
     bool is_complex_matrix = mat.Type().IsComplex();
+    std::size_t num_zero_vars = 0;
     while (mat.HasNext()) {
       auto [first, second, var] = mat.Next();
       DCHECK_GT(first, 0);
       DCHECK_GT(second, 0);
       --first;
       --second;
+      if (MatrixMarketIo::IsVarZero(var)) {
+        ++num_zero_vars;
+        continue;
+      }
       while (prev_col != second) {
         index_.push_back(nnz_);
         ++prev_col;
@@ -335,7 +342,7 @@ public:
         DCHECK_LE(std::get<int64_t>(var),
                   std::numeric_limits<ValueType>::max());
         DCHECK_GE(std::get<int64_t>(var),
-                  std::numeric_limits<ValueType>::min());
+                  std::numeric_limits<ValueType>::lowest());
         DCHECK(values_mmap_.empty());
         values_.push_back(std::get<int64_t>(var));
       } else if (is_real_matrix) {
@@ -355,6 +362,8 @@ public:
       nnz_++;
     }
     index_.push_back(nnz_);
+    if (num_zero_vars)
+      LOG(INFO) << "Number of zero vars: " << num_zero_vars;
     return absl::OkStatus();
   }
 

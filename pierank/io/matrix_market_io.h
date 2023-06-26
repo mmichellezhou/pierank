@@ -228,8 +228,23 @@ private:
 
 class MatrixMarketIo {
 public:
+  using Var =
+      std::variant<std::monostate, int64_t, double, std::complex<double>>;
+
+  using Entry = std::tuple<uint32_t, uint32_t, Var>;
+
   inline static bool HasMtxFileExtension(absl::string_view path) {
     return absl::EndsWith(path, ".mtx");
+  }
+
+  inline static bool IsVarZero(const Var &var) {
+    if (std::holds_alternative<std::monostate>(var)) return false;
+    if (std::holds_alternative<int64_t>(var)) return !std::get<int64_t>(var);
+    if (std::holds_alternative<double>(var)) return !std::get<double>(var);
+    if (std::holds_alternative<std::complex<double>>(var))
+      return !std::get<std::complex<double>>(var).real() &&
+             !std::get<std::complex<double>>(var).imag();
+    CHECK(false);
   }
 
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
@@ -299,11 +314,10 @@ public:
 
   bool HasNext() const { return count_ < nnz_; }
 
-  std::tuple<uint32_t, uint32_t, std::variant<std::monostate, int64_t, double, std::complex<double>>>
-  Next() {
+  Entry Next() {
     uint32_t first, second;
     is_ >> first >> second;
-    std::variant<std::monostate, int64_t, double, std::complex<double>> var;
+    Var var;
     if (type_.IsInteger()) {
       int64_t value;
       is_ >> value;
