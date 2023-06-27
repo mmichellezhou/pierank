@@ -194,3 +194,27 @@ TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
 }
+
+TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
+  auto file_path = TestDataFilePath("bcsstm02.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  EXPECT_EQ(mat(0, 1), 0);
+  EXPECT_EQ(mat(0, 0), 0.09213858051);
+  EXPECT_EQ(mat(3, 3), 0.137995737983);
+  EXPECT_EQ(mat(9, 9), 0.09213858051);
+  EXPECT_EQ(mat(12, 12), 0.172828573455);
+  EXPECT_EQ(mat(15, 15), 0.0852383576022);
+  EXPECT_EQ(mat(22, 22), 0.172828573455);
+  EXPECT_EQ(mat(25, 25), 0.0617332189107);
+  EXPECT_EQ(mat(65, 65), 0.019746938665);
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t> mat0;
+  EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat0);
+}
