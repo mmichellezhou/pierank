@@ -308,6 +308,7 @@ public:
     if (item_size_ == sizeof(T))
       reinterpret_cast<T *>(vals_.data())[idx] += delta;
     else {
+      DCHECK_LT(item_size_, sizeof(T));
       auto ptr = vals_.data() + idx * item_size_;
       PRK_MEMCPY(&res, ptr, item_size_);
       res += delta;

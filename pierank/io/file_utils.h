@@ -5,6 +5,7 @@
 #ifndef PIERANK_IO_FILE_UTILS_H_
 #define PIERANK_IO_FILE_UTILS_H_
 
+#include <complex>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -241,6 +242,32 @@ WriteData<FILE, float>(FILE *fp, const float *data, uint64_t size) {
   return fwrite(data, sizeof(*data), size, fp) == size;
 }
 
+template<>
+inline bool
+WriteData<std::ostream, std::complex<double>>(std::ostream *os,
+                                              const std::complex<double> *data,
+                                              uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, std::complex<double>>(std::ofstream *ofs,
+                                               const std::complex<double> *data,
+                                               uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, std::complex<double>>(FILE *fp,
+                                      const std::complex<double> *data,
+                                      uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
+}
+
 template<typename ValueType, typename OutputStreamType>
 inline bool WriteInteger(OutputStreamType *os, ValueType val,
                          uint64_t size = sizeof(ValueType)) {
@@ -366,6 +393,56 @@ ReadData<std::ifstream, float>(std::ifstream *ifs, float *data,
 
 template<>
 inline bool ReadData<FILE, float>(FILE *fp, float *data, uint64_t size) {
+  return fread(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
+ReadData<std::istream, std::complex<double>>(std::istream *is,
+                                             std::complex<double> *data,
+                                             uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
+                                    size * sizeof(*data)));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, std::complex<double>>(std::ifstream *ifs,
+                                              std::complex<double> *data,
+                                              uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool ReadData<FILE, std::complex<double>>(FILE *fp,
+                                                 std::complex<double> *data,
+                                                 uint64_t size) {
+  return fread(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
+ReadData<std::istream, std::complex<float>>(std::istream *is,
+                                             std::complex<float> *data,
+                                             uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
+                                    size * sizeof(*data)));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, std::complex<float>>(std::ifstream *ifs,
+                                              std::complex<float> *data,
+                                              uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool ReadData<FILE, std::complex<float>>(FILE *fp,
+                                                 std::complex<float> *data,
+                                                 uint64_t size) {
   return fread(data, sizeof(*data), size, fp) == size;
 }
 

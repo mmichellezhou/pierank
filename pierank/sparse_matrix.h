@@ -142,18 +142,22 @@ public:
     PosType non_idx_pos;
     FlexPosIterator first, last;
     if (index_dim_ == 0) {
-      if (pos0 >= index_.size()) return 0;
+      if (pos0 + 1 >= index_.size()) return 0;
       first = pos_(index_[pos0]);
       last = pos_(index_[pos0 + 1]);
       non_idx_pos = pos1;
     } else {
-      if (pos1 >= index_.size()) return 0;
+      if (pos1 + 1 >= index_.size()) return 0;
       first = pos_(index_[pos1]);
       last = pos_(index_[pos1 + 1]);
       non_idx_pos = pos0;
     }
     auto it = std::lower_bound(first, last, non_idx_pos);
-    return (it != last && *it == non_idx_pos) ? At(it - pos_()) : 0;
+    if (it != last && *it == non_idx_pos) {
+      if (!type_.IsPattern()) return At(it - pos_());
+      return 1;
+    } else
+      return 0;
   }
 
   ValueType At(PosType pos0, PosType pos1) const { return (*this)(pos0, pos1); }
@@ -187,8 +191,9 @@ public:
 
   absl::Status status() const { return status_; }
 
-  friend bool operator==(const SparseMatrix<PosType, IdxType> &lhs,
-                         const SparseMatrix<PosType, IdxType> &rhs) {
+  friend bool
+  operator==(const SparseMatrix<PosType, IdxType, ValueContainerType> &lhs,
+             const SparseMatrix<PosType, IdxType, ValueContainerType> &rhs) {
     if (lhs.rows_ != rhs.rows_) return false;
     if (lhs.cols_ != rhs.cols_) return false;
     if (lhs.nnz_ != rhs.nnz_) return false;
@@ -339,16 +344,21 @@ public:
       }
       pos_.push_back(first);
       if (is_integer_matrix) {
-        DCHECK_LE(std::get<int64_t>(var),
-                  std::numeric_limits<ValueType>::max());
-        DCHECK_GE(std::get<int64_t>(var),
-                  std::numeric_limits<ValueType>::lowest());
+        if constexpr (std::is_integral_v<ValueType>) {
+          DCHECK_LE(std::get<int64_t>(var),
+                    std::numeric_limits<ValueType>::max());
+          DCHECK_GE(std::get<int64_t>(var),
+                    std::numeric_limits<ValueType>::lowest());
+        }
         DCHECK(values_mmap_.empty());
         values_.push_back(std::get<int64_t>(var));
       } else if (is_real_matrix) {
-        DCHECK_LE(std::get<double>(var), std::numeric_limits<ValueType>::max());
-        DCHECK_GE(std::get<double>(var),
-                  std::numeric_limits<ValueType>::lowest());
+        if constexpr (std::is_floating_point_v<ValueType>) {
+          DCHECK_LE(std::get<double>(var),
+                    std::numeric_limits<ValueType>::max());
+          DCHECK_GE(std::get<double>(var),
+                    std::numeric_limits<ValueType>::lowest());
+        }
         DCHECK(values_mmap_.empty());
         values_.push_back(std::get<double>(var));
       } else if (is_complex_matrix) {
@@ -357,7 +367,8 @@ public:
           values_.push_back(std::get<std::complex<double>>(var));
         } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
           values_.push_back(std::get<std::complex<double>>(var));
-        }
+        } else
+          CHECK(false) << "Complex matrix must have floating point data type";
       }
       nnz_++;
     }
