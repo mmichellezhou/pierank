@@ -282,3 +282,31 @@ TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
 }
+
+TEST(SparseMatrixTests, ReadFarmMtxFile) {
+  auto file_path = TestDataFilePath("farm.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using ValueContainer = std::vector<uint8_t>;
+  SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  EXPECT_EQ(mat(3, 3), 0);
+  EXPECT_EQ(mat(0, 0), 1);
+  EXPECT_EQ(mat(1, 1), 1);
+  EXPECT_EQ(mat(1, 5), 1);
+  EXPECT_EQ(mat(2, 5), 20);
+  EXPECT_EQ(mat(3, 6), 40);
+  EXPECT_EQ(mat(0, 11), 250);
+  EXPECT_EQ(mat(0, 14), 125);
+  EXPECT_EQ(mat(3, 14), 10);
+  EXPECT_EQ(mat(2, 15), 1);
+  EXPECT_EQ(mat(3, 16), 1);
+  EXPECT_EQ(mat(4, 16), 0);
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t, ValueContainer> mat0;
+  EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat0);
+}

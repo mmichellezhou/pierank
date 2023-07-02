@@ -156,6 +156,28 @@ inline bool WriteData<FILE, char>(FILE *fp, const char *data, uint64_t size) {
 
 template<>
 inline bool
+WriteData<std::ostream, uint8_t>(std::ostream *os, const uint8_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, uint8_t>(std::ofstream *ofs, const uint8_t *data,
+                                  uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, uint8_t>(FILE *fp, const uint8_t *data, uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
 WriteData<std::ostream, uint32_t>(std::ostream *os, const uint32_t *data,
                                   uint64_t size) {
   return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
@@ -309,6 +331,25 @@ ReadData<std::ifstream, char>(std::ifstream *ifs, char *data, uint64_t size) {
 
 template<>
 inline bool ReadData<FILE, char>(FILE *fp, char *data, uint64_t size) {
+  return fread(data, 1, size, fp) == size;
+}
+
+template<>
+inline bool
+ReadData<std::istream, uint8_t>(std::istream *is, uint8_t *data,
+                                uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data), size));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, uint8_t>(std::ifstream *ifs, uint8_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data), size));
+}
+
+template<>
+inline bool ReadData<FILE, uint8_t>(FILE *fp, uint8_t *data, uint64_t size) {
   return fread(data, 1, size, fp) == size;
 }
 
