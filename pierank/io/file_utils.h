@@ -290,6 +290,32 @@ WriteData<FILE, std::complex<double>>(FILE *fp,
   return fwrite(data, sizeof(*data), size, fp) == size;
 }
 
+template<>
+inline bool
+WriteData<std::ostream, std::complex<float>>(std::ostream *os,
+                                             const std::complex<float> *data,
+                                             uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, std::complex<float>>(std::ofstream *ofs,
+                                              const std::complex<float> *data,
+                                              uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, std::complex<float>>(FILE *fp,
+                                     const std::complex<float> *data,
+                                     uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
+}
+
 template<typename ValueType, typename OutputStreamType>
 inline bool WriteInteger(OutputStreamType *os, ValueType val,
                          uint64_t size = sizeof(ValueType)) {

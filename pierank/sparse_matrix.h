@@ -366,7 +366,8 @@ public:
         if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
           values_.push_back(std::get<std::complex<double>>(var));
         } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
-          values_.push_back(std::get<std::complex<double>>(var));
+          values_.emplace_back(std::get<std::complex<double>>(var).real(),
+                               std::get<std::complex<double>>(var).imag());
         } else
           CHECK(false) << "Complex matrix must have floating point data type";
       }
