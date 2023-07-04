@@ -132,6 +132,28 @@ inline bool ConvertAndWriteUint64(std::ostream *os, SrcType src_val) {
   return ConvertAndWriteInteger<SrcType, uint64_t>(os, src_val);
 }
 
+template<typename SrcType, typename DestType>
+inline bool ConvertAndWriteInteger(FILE *fp, SrcType src_val) {
+  static_assert(std::is_integral_v<SrcType>);
+  static_assert(std::is_integral_v<DestType>);
+  DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
+  DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
+  DestType dest_val = static_cast<DestType>(src_val);
+  return fwrite(reinterpret_cast<const char *>(&dest_val),
+                sizeof(dest_val), 1, fp)
+         == sizeof(dest_val);
+}
+
+template<typename SrcType>
+inline bool ConvertAndWriteUint32(FILE *fp, SrcType src_val) {
+  return ConvertAndWriteInteger<SrcType, uint32_t>(fp, src_val);
+}
+
+template<typename SrcType>
+inline bool ConvertAndWriteUint64(FILE *fp, SrcType src_val) {
+  return ConvertAndWriteInteger<SrcType, uint64_t>(fp, src_val);
+}
+
 template<typename OutputStreamType, typename DataType = char>
 bool WriteData(OutputStreamType *os, const DataType *data, uint64_t size = 1);
 

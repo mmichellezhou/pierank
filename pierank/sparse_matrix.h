@@ -119,10 +119,6 @@ public:
   using UniquePtr =
       std::unique_ptr<SparseMatrix<PosType, IdxType, ValueContainerType>>;
 
-  using UniqueIdxPtr = std::unique_ptr<FlexIdxType>;
-
-  using UniquePosPtr = std::unique_ptr<FlexPosType>;
-
   using RangeFunc = void (SparseMatrix<PosType, IdxType>::*)(
       const PosRanges &ranges, uint32_t range_id);
 
@@ -201,7 +197,7 @@ public:
     if (lhs.index_dim_ != rhs.index_dim_) return false;
     if (lhs.index_ != rhs.index_) return false;
     if (lhs.pos_ != rhs.pos_) return false;
-    if (lhs.values_ != rhs.values_) return false;
+    if (lhs.value_ != rhs.value_) return false;
     return true;
   }
 
@@ -220,9 +216,9 @@ public:
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
     matrix.WriteAllButPosAndValues(&os);
     os << matrix.pos_;
-    WriteUint64(&os, matrix.values_.size());
-    WriteData<std::ostream, ValueType>(&os, matrix.values_.data(),
-                                       matrix.values_.size());
+    WriteUint64(&os, matrix.value_.size());
+    WriteData<std::ostream, ValueType>(&os, matrix.value_.data(),
+                                       matrix.value_.size());
     return os;
   }
 
@@ -250,8 +246,8 @@ public:
     is >> matrix.index_;
     is >> matrix.pos_;
     auto size = ReadUint64(&is);
-    matrix.values_.resize(size);
-    ReadData(&is, matrix.values_.data(), size);
+    matrix.value_.resize(size);
+    ReadData(&is, matrix.value_.data(), size);
     return is;
   }
 
@@ -294,7 +290,7 @@ public:
       auto mmap = MmapReadOnlyFile(path, offset, size);
       offset += size;
       if (!mmap.ok()) return mmap.status();
-      values_mmap_ = *std::move(mmap);
+      value_mmap_ = *std::move(mmap);
     } else
       CHECK(type_.IsPattern()) << "Only pattern matrices have no values";
     return status_;
@@ -303,7 +299,7 @@ public:
   void UnMmap() {
     index_.UnMmap();
     pos_.UnMmap();
-    if (values_mmap_.size()) values_mmap_.unmap();
+    if (value_mmap_.size()) value_mmap_.unmap();
   }
 
   absl::Status ReadMatrixMarketFile(const std::string &path,
@@ -350,8 +346,8 @@ public:
           DCHECK_GE(std::get<int64_t>(var),
                     std::numeric_limits<ValueType>::lowest());
         }
-        DCHECK(values_mmap_.empty());
-        values_.push_back(std::get<int64_t>(var));
+        DCHECK(value_mmap_.empty());
+        value_.push_back(std::get<int64_t>(var));
       } else if (is_real_matrix) {
         if constexpr (std::is_floating_point_v<ValueType>) {
           DCHECK_LE(std::get<double>(var),
@@ -359,15 +355,15 @@ public:
           DCHECK_GE(std::get<double>(var),
                     std::numeric_limits<ValueType>::lowest());
         }
-        DCHECK(values_mmap_.empty());
-        values_.push_back(std::get<double>(var));
+        DCHECK(value_mmap_.empty());
+        value_.push_back(std::get<double>(var));
       } else if (is_complex_matrix) {
-        DCHECK(values_mmap_.empty());
+        DCHECK(value_mmap_.empty());
         if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
-          values_.push_back(std::get<std::complex<double>>(var));
+          value_.push_back(std::get<std::complex<double>>(var));
         } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
-          values_.emplace_back(std::get<std::complex<double>>(var).real(),
-                               std::get<std::complex<double>>(var).imag());
+          value_.emplace_back(std::get<std::complex<double>>(var).real(),
+                              std::get<std::complex<double>>(var).imag());
         } else
           CHECK(false) << "Complex matrix must have floating point data type";
       }
@@ -482,109 +478,46 @@ public:
     return MaxRanges(max_nnz_per_range, pool ? pool->Size() : 1);
   }
 
-  // Counts the # of non-zeros (nnz) for each pos in non-index dim
-  UniquePosPtr CountNonIndexDimNnz() const {
-    PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
-    auto res = std::make_unique<FlexPosType>(pos_.ItemSize(),
-                                             non_index_dim_size);
-    auto index_pos_end = this->IndexPosEnd();
-    for (PosType p = 0; p < index_pos_end; ++p) {
-      for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
-        res->IncItem(pos_[i]);
-    }
-
-    return res;
-  }
-
-  UniqueIdxPtr CreateReverseIndex(const FlexPosType &nbr) const {
-    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
-    CHECK(!idx_shift_by_min_val) << "Not yet supported";
-    auto res = std::make_unique<FlexIdxType>(idx_item_size);
-    IdxType nnz = 0;
-    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
-    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
-      res->push_back(nnz);
-      nnz += nbr[p];
-    }
-    DCHECK_EQ(nnz, nnz_);
-    if ((*res)[res->size() - 1] != nnz)
-      res->push_back(nnz);
-
-    return res;
-  }
-
-  std::vector<IdxType> RangeNnzOffsets(const PosRanges &ranges) const {
-    std::vector<IdxType> res;
-    // std::transform_exclusive_scan(
-    //    ranges.begin(), ranges.end(),
-    //    std::back_inserter(res), 0, std::plus<IdxType>{},
-    //    [](const PosRange &range) { return std::get<2>(range); });
-    res.push_back(0);
-    for (std::size_t i = 0; i < ranges.size() - 1; ++i)
-      res.push_back(res.back() + std::get<2>(ranges[i]));
-
-    return res;
-  }
-
-  UniquePosPtr ReversePosInRange(const PosRanges &ranges,
-                                 const std::vector<IdxType> &offsets,
-                                 uint32_t range_id,
-                                 const FlexIdxType &idx,
-                                 FlexPosType *nbr) const {
-    auto [min_pos, max_pos, range_size] = ranges[range_id];
-    auto offset = offsets[range_id];
-    auto index_pos_end = IndexPosEnd();
-    uint32_t pos_item_size = MinEncodeSize(index_pos_end);
-    auto res = std::make_unique<FlexPosType>(pos_item_size, range_size);
-
-    for (PosType p = 0; p < index_pos_end; ++p) {
-      for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
-        auto pos_i = pos_[i];
-        if (pos_i >= min_pos && pos_i < max_pos) {
-          res->SetItem(idx[pos_i] + (*nbr)[pos_i] - offset, p);
-          nbr->IncItem(pos_i);
-        }
-      }
-    }
-    return res;
-  }
-
   absl::StatusOr<UniquePtr>
   ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
                  uint64_t max_nnz_per_thread = 8000000) const {
-    CHECK(this->type_.IsPattern()) << "Only pattern matrices are supported";
     auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
-    auto nnz = CountNonIndexDimNnz();
-    auto idx = CreateReverseIndex(*nnz);
+    auto&& nnz = CountNonIndexDimNnz();
+    auto&& idx = ReverseIndex(nnz);
     auto ranges =
-        SplitIndexDimByNnz(*idx, nnz_, MaxRanges(max_nnz_per_thread, pool));
+        SplitIndexDimByNnz(idx, nnz_, MaxRanges(max_nnz_per_thread, pool));
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
-    std::vector<UniquePosPtr> poses(ranges.size());
-    nnz->Reset();
+    nnz.Reset();
 
     if (ranges.size() == 1) {
-      auto pos = ReversePosInRange(ranges, offsets, 0, *idx, nnz.get());
-      res->pos_ = std::move(*pos.release());
+      ChangeIndexInRange(ranges, offsets, 0, idx, &nnz, &res->pos_,
+                         &res->value_);
     } else {
+      std::vector<FlexPosType> poses(ranges.size());
+      std::vector<ValueContainerType> values(ranges.size());
       DCHECK(pool);
       pool->ParallelFor(
           ranges.size(), /*items_per_thread=*/1,
           [&, this](uint64_t first, uint64_t last) {
             for (auto r = first; r < last; ++r) {
-              auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
-              poses[r] = std::move(pos);
+              ChangeIndexInRange(ranges, offsets, r, idx, &nnz, &poses[r],
+                                 &values[r]);
             }
           });
-      res->pos_.SetItemSize(poses.front()->ItemSize());
+      res->pos_.SetItemSize(poses.front().ItemSize());
       for (auto &pos : poses) {
-        res->pos_.Append(*pos);
-        pos.reset();
+        res->pos_.Append(pos);
+        pos.clear();
+      }
+      for (auto &value : values) {
+        res->value_.insert(res->value_.end(), value.begin(), value.end());
+        value.clear();
       }
     }
-    res->index_ = std::move(*idx.release());
+    res->index_ = std::move(idx);
     return res;
   }
 
@@ -594,37 +527,53 @@ public:
       uint64_t max_nnz_per_range = 64000000) const {
     auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
-    auto nnz = CountNonIndexDimNnz();
-    auto idx = CreateReverseIndex(*nnz);
-    auto ranges = SplitIndexDimByNnz(*idx, nnz_, MaxRanges(max_nnz_per_range));
+    auto&& nnz = CountNonIndexDimNnz();
+    auto&& idx = ReverseIndex(nnz);
+    auto ranges = SplitIndexDimByNnz(idx, nnz_, MaxRanges(max_nnz_per_range));
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
-    // <num_items, item_size, file_path> for each range's pos FlexIndex
-    std::vector<std::tuple<uint64_t, uint32_t, std::string>> tmp_pos_infos;
-    nnz->Reset();
+    // <num_items, pos_item_size, pos_file, val_file> for each range
+    std::vector<std::tuple<uint64_t, uint32_t, std::string, std::string>>
+        tmp_file_infos;
+    nnz.Reset();
     auto pos_min = std::numeric_limits<PosType>::max();
     auto pos_max = std::numeric_limits<PosType>::min();
+    bool has_value = !type_.IsPattern();
     for (uint32_t r = 0; r < ranges.size(); ++r) {
-      auto pos = ReversePosInRange(ranges, offsets, r, *idx, nnz.get());
-      pos_min = std::min(pos_min, pos->MinValue());
-      pos_max = std::max(pos_max, pos->MaxValue());
-      auto[fp, tmp_path] = OpenTmpFile(path);
-      DCHECK(fp);
-      tmp_pos_infos.push_back(
-          std::make_tuple(pos->size(), pos->ItemSize(), tmp_path));
-      if (!pos->WriteValues(fp, pos->ItemSize(), /*shift_by_min_val=*/false))
-        return absl::InternalError("Error write file: " + tmp_path);
-      fclose(fp);
+      FlexPosType pos;
+      ValueContainerType value;
+      ChangeIndexInRange(ranges, offsets, r, idx, &nnz, &pos, &value);
+      pos_min = std::min(pos_min, pos.MinValue());
+      pos_max = std::max(pos_max, pos.MaxValue());
+      auto[fpos, pos_file] = OpenTmpFile(path);
+      CHECK(fpos);
+      if (!pos.WriteValues(fpos, pos.ItemSize(), /*shift_by_min_val=*/false))
+        return absl::InternalError("Error write file: " + pos_file);
+      fclose(fpos);
+
+      std::string val_file;
+      if (has_value) {
+        FILE *fval;
+        std::tie(fval, val_file) = OpenTmpFile(path);
+        CHECK(fval);
+        ConvertAndWriteUint64(fval, value.size());
+        WriteData(fval, value.data(), value.size());
+        fclose(fval);
+      } else
+        DCHECK(value.empty());
+
+      tmp_file_infos.push_back(
+          std::make_tuple(pos.size(), pos.ItemSize(), pos_file, val_file));
     }
     DCHECK_GE(pos_min, 0);
     DCHECK_LT(pos_max, res->index_dim_ ? res->rows_ : res->cols_);
-    DCHECK_EQ(tmp_pos_infos.size(), ranges.size());
+    DCHECK_EQ(tmp_file_infos.size(), ranges.size());
 
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
     auto ofs = std::move(file_or).value();
-    res->index_ = std::move(*idx.release());
+    res->index_ = std::move(idx);
     res->WriteAllButPosAndValues(&ofs);
     res->pos_.SetMinMaxValues(pos_min, pos_max);
     auto[pos_item_size, pos_shift_by_min_val] = FlexPosType::MinEncode(pos_max,
@@ -633,18 +582,41 @@ public:
     res->pos_.WriteAllButValues(&ofs, pos_item_size, pos_shift_by_min_val);
     if (!WriteUint64(&ofs, pos_item_size * nnz_))
       return absl::InternalError("Error write file: " + path);
-    for (const auto &tmp_pos_info : tmp_pos_infos) {
-      auto[tmp_pos_items, tmp_pos_item_size, tmp_pos_path] = tmp_pos_info;
-      auto tmp_file_or = OpenReadFile(tmp_pos_path);
-      if (!tmp_file_or.ok()) return tmp_file_or.status();
-      FlexPosType pos(pos_item_size, tmp_pos_items);
-      pos.ReadValues(&*tmp_file_or, tmp_pos_item_size, pos_value_shift);
-      DCHECK_EQ(pos.size(), tmp_pos_items);
-      WriteData(&ofs, pos.Data(), pos_item_size * tmp_pos_items);
-      std::remove(tmp_pos_path.c_str());
+    uint64_t total_items = 0;
+    for (const auto &tmp_file_info : tmp_file_infos) {
+      auto[num_items, pos_item_size, pos_file, val_file] = tmp_file_info;
+      auto pos_file_or = OpenReadFile(pos_file);
+      if (!pos_file_or.ok()) return pos_file_or.status();
+      FlexPosType pos(pos_item_size, num_items);
+      pos.ReadValues(&*pos_file_or, pos_item_size, pos_value_shift);
+      CHECK_EQ(pos.size(), num_items);
+      total_items += num_items;
+      WriteData(&ofs, pos.Data(), pos_item_size * num_items);
+      std::remove(pos_file.c_str());
     }
-    // Write 0 as size of res->values_, which is empty for pattern matrices.
-    WriteUint64(&ofs, 0);
+    CHECK_EQ(total_items, nnz_);
+
+    auto value_size = has_value ? nnz_ : 0;  // 0 for pattern matrices
+    // Write size of res->value_
+    if (!WriteUint64(&ofs, value_size))
+      return absl::InternalError("Error write file: " + path);
+    if (has_value) {
+      total_items = 0;
+      for (const auto &tmp_file_info : tmp_file_infos) {
+        auto[num_items, pos_item_size, pos_file, val_file] = tmp_file_info;
+        auto val_file_or = OpenReadFile(val_file);
+        if (!val_file_or.ok()) return val_file_or.status();
+        auto size = ReadUint64(&*val_file_or);
+        CHECK_EQ(size, num_items);
+        total_items += num_items;
+        ValueContainerType value;
+        value.resize(size);
+        ReadData(&*val_file_or, value.data(), size);
+        WriteData(&ofs, value.data(), size);
+        std::remove(val_file.c_str());
+      }
+      CHECK_EQ(total_items, nnz_);
+    }
     ofs.close();
 
     res.reset(new SparseMatrix<PosType, IdxType>(path, /*mmap=*/true));
@@ -669,11 +641,11 @@ public:
     absl::StrAppend(&res, tab, "}\n");
     absl::StrAppend(&res, tab, "pos {\n", pos_.DebugString(max_items, indent));
     absl::StrAppend(&res, tab, "}\n");
-    absl::StrAppend(&res, tab, "values: ",
-                    values_mmap_.empty()
-                    ? VectorToString(values_, max_items)
-                    : VectorToString<decltype(values_mmap_), ValueType>(
-                        values_mmap_, max_items));
+    absl::StrAppend(&res, tab, "value: ",
+                    value_mmap_.empty()
+                    ? VectorToString(value_, max_items)
+                    : VectorToString<decltype(value_mmap_), ValueType>(
+                        value_mmap_, max_items));
     absl::StrAppend(&res, "\n");
 
     return res;
@@ -698,9 +670,9 @@ protected:
   absl::Status status_;
 
   ValueType At(IdxType idx) const {
-    return values_mmap_.empty()
-           ? reinterpret_cast<const ValueType *>(values_.data())[idx]
-           : reinterpret_cast<const ValueType *>(values_mmap_.data())[idx];
+    return value_mmap_.empty()
+           ? reinterpret_cast<const ValueType *>(value_.data())[idx]
+           : reinterpret_cast<const ValueType *>(value_mmap_.data())[idx];
   }
 
   virtual void InitRanges(const PosRanges &ranges, uint32_t range_id) {}
@@ -786,6 +758,77 @@ protected:
     return res;
   }
 
+  FlexPosType&& CountNonIndexDimNnz() const {
+    PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
+    auto pos = new FlexPosType(pos_.ItemSize(), non_index_dim_size);
+    auto index_pos_end = this->IndexPosEnd();
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
+        pos->IncItem(pos_[i]);
+    }
+    return std::move(*pos);
+  }
+
+  FlexIdxType&& ReverseIndex(const FlexPosType &nbr) const {
+    auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
+    CHECK(!idx_shift_by_min_val) << "Not yet supported";
+    auto idx = new FlexIdxType(idx_item_size);
+    IdxType nnz = 0;
+    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
+    for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
+      idx->push_back(nnz);
+      nnz += nbr[p];
+    }
+    DCHECK_EQ(nnz, nnz_);
+    if ((*idx)[idx->size() - 1] != nnz)
+      idx->push_back(nnz);
+
+    return std::move(*idx);
+  }
+
+  std::vector<IdxType> RangeNnzOffsets(const PosRanges &ranges) const {
+    std::vector<IdxType> res;
+    // std::transform_exclusive_scan(
+    //    ranges.begin(), ranges.end(),
+    //    std::back_inserter(res), 0, std::plus<IdxType>{},
+    //    [](const PosRange &range) { return std::get<2>(range); });
+    res.push_back(0);
+    for (std::size_t i = 0; i < ranges.size() - 1; ++i)
+      res.push_back(res.back() + std::get<2>(ranges[i]));
+
+    return res;
+  }
+
+  void ChangeIndexInRange(const PosRanges &ranges,
+                          const std::vector <IdxType> &offsets,
+                          uint32_t range_id,
+                          const FlexIdxType &idx,
+                          FlexPosType *nbr,
+                          FlexPosType *pos,
+                          ValueContainerType *value) const {
+    auto [min_pos, max_pos, range_size] = ranges[range_id];
+    auto offset = offsets[range_id];
+    auto index_pos_end = IndexPosEnd();
+    uint32_t pos_item_size = MinEncodeSize(index_pos_end);
+    *pos = std::move(FlexPosType(pos_item_size, range_size));
+
+    DCHECK(value->empty());
+    bool has_value = !type_.IsPattern();
+    value->resize(has_value ? range_size : 0);
+
+    for (PosType p = 0; p < index_pos_end; ++p) {
+      for (IdxType i = index_[p]; i < index_[p + 1]; ++i) {
+        auto pos_i = pos_[i];
+        if (pos_i >= min_pos && pos_i < max_pos) {
+          auto i_new = idx[pos_i] + (*nbr)[pos_i] - offset;
+          pos->SetItem(i_new, p);
+          if (has_value) (*value)[i_new] = value_[i];
+          nbr->IncItem(pos_i);
+        }
+      }
+    }
+  }
+
 private:
   PosType rows_ = 0;
   PosType cols_ = 0;
@@ -794,8 +837,8 @@ private:
   uint32_t index_dim_ = 0;
   FlexIdxType index_;
   FlexPosType pos_;
-  ValueContainerType values_;
-  mio::mmap_source values_mmap_;
+  ValueContainerType value_;
+  mio::mmap_source value_mmap_;
 };
 
 }  // namespace pierank

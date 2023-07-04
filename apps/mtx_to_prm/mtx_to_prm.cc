@@ -19,6 +19,8 @@ ABSL_FLAG(std::string, output_dir, "",
 ABSL_FLAG(bool, output_row_major, false, "Output in row major order");
 
 int main(int argc, char **argv) {
+  google::InitGoogleLogging(argv[0]);
+  FLAGS_logtostderr = 1;
   absl::ParseCommandLine(argc, argv);
 
   pierank::SparseMatrix<uint32_t, uint64_t> mat;

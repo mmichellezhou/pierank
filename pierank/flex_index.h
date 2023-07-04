@@ -359,7 +359,6 @@ public:
   }
 
   friend bool operator==(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
-    CHECK_EQ(lhs.shift_by_min_val_, rhs.shift_by_min_val_) << "Not supported";
     if (lhs.num_items_ != rhs.num_items_) return false;
     if (lhs.item_size_ == rhs.item_size_ && lhs.Bytes() == rhs.Bytes()
         && lhs.sketch_bits_ == rhs.sketch_bits_) {
@@ -632,6 +631,12 @@ public:
     DCHECK(vals_.empty());
     if (vals_mmap_.size())
       vals_mmap_.unmap();
+  }
+
+  void clear() {
+    if (vals_mmap_.size())
+      vals_mmap_.unmap();
+    *this = std::move(FlexIndex());
   }
 
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {

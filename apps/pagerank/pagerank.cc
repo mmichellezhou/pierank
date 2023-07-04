@@ -21,6 +21,8 @@ ABSL_FLAG(bool, update_score_in_place, false,
     "Output PageRank score to same input score vector (not thread safe)");
 
 int main(int argc, char **argv) {
+  google::InitGoogleLogging(argv[0]);
+  FLAGS_logtostderr = 1;
   absl::ParseCommandLine(argc, argv);
 
   pierank::Timer timer(absl::Now());

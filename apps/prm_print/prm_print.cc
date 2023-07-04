@@ -13,6 +13,8 @@ ABSL_FLAG(int64_t, max_items, 0, "Print up to this many items per array");
 ABSL_FLAG(std::string, prm_file, "", "PieRank Matrix (.prm) file");
 
 int main(int argc, char **argv) {
+  google::InitGoogleLogging(argv[0]);
+  FLAGS_logtostderr = 1;
   absl::ParseCommandLine(argc, argv);
 
   std::string prm_file = absl::GetFlag(FLAGS_prm_file);
