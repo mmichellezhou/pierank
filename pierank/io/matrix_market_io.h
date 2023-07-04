@@ -20,9 +20,9 @@ namespace pierank {
 
 class MatrixType {
 public:
-  constexpr static std::size_t kShortStringLength = 3;
+  constexpr static std::size_t kStringLength = 3;
 
-  enum Value : uint32_t {
+  enum Enum : uint32_t {
     kUnknown,
     kArrayComplexGeneral,
     kArrayRealGeneral,
@@ -38,37 +38,7 @@ public:
     kCoordinateRealSymmetric
   };
 
-  static Value FromString(absl::string_view str) {
-    if (str == "unknown")
-      return kUnknown;
-    if (str == "array complex general")
-      return kArrayComplexGeneral;
-    if (str == "array real general")
-      return kArrayRealGeneral;
-    if (str == "coordinate complex general")
-      return kCoordinateComplexGeneral;
-    if (str == "coordinate complex Hermitian")
-      return kCoordinateComplexHermitian;
-    if (str == "coordinate complex symmetric")
-      return kCoordinateComplexSymmetric;
-    if (str == "coordinate integer general")
-      return kCoordinateIntegerGeneral;
-    if (str == "coordinate integer symmetric")
-      return kCoordinateIntegerSymmetric;
-    if (str == "coordinate pattern general")
-      return kCoordinatePatternGeneral;
-    if (str == "coordinate pattern symmetric")
-      return kCoordinatePatternSymmetric;
-    if (str == "coordinate real general")
-      return kCoordinateRealGeneral;
-    if (str == "coordinate real skew-symmetric")
-      return kCoordinateRealSkewSymmetric;
-    if (str == "coordinate real symmetric")
-      return kCoordinateRealSymmetric;
-    return kUnknown;
-  }
-
-  static Value FromShortString(absl::string_view str) {
+  static Enum FromString(absl::string_view str) {
     if (str == "UNK") return kUnknown;
     if (str == "ACG") return kArrayComplexGeneral;
     if (str == "ARG") return kArrayRealGeneral;
@@ -85,11 +55,33 @@ public:
     return kUnknown;
   }
 
+  static Enum FromLongString(absl::string_view str) {
+    if (str == "unknown") return kUnknown;
+    if (str == "array complex general") return kArrayComplexGeneral;
+    if (str == "array real general") return kArrayRealGeneral;
+    if (str == "coordinate complex general") return kCoordinateComplexGeneral;
+    if (str == "coordinate complex Hermitian")
+      return kCoordinateComplexHermitian;
+    if (str == "coordinate complex symmetric")
+      return kCoordinateComplexSymmetric;
+    if (str == "coordinate integer general") return kCoordinateIntegerGeneral;
+    if (str == "coordinate integer symmetric")
+      return kCoordinateIntegerSymmetric;
+    if (str == "coordinate pattern general") return kCoordinatePatternGeneral;
+    if (str == "coordinate pattern symmetric")
+      return kCoordinatePatternSymmetric;
+    if (str == "coordinate real general") return kCoordinateRealGeneral;
+    if (str == "coordinate real skew-symmetric")
+      return kCoordinateRealSkewSymmetric;
+    if (str == "coordinate real symmetric") return kCoordinateRealSymmetric;
+    return kUnknown;
+  }
+
   MatrixType() = default;
 
-  MatrixType(Value value) : val_(value) {}
+  MatrixType(Enum value) : val_(value) {}
 
-  MatrixType(absl::string_view str) : val_(FromShortString(str)) {}
+  MatrixType(absl::string_view str) : val_(FromString(str)) {}
 
   inline bool IsPattern() const {
     return val_ == kCoordinatePatternGeneral ||
@@ -121,84 +113,57 @@ public:
            val_ == kCoordinateRealSymmetric;
   }
 
-  constexpr operator Value() const { return val_; }
+  constexpr operator Enum() const { return val_; }
 
   std::string ToString() const {
     switch (val_) {
-      case kUnknown:
-        return "unknown";
-      case kArrayComplexGeneral:
-        return "array complex general";
-      case kArrayRealGeneral:
-        return "array real general";
-      case kCoordinateComplexGeneral:
-        return "coordinate complex general";
-      case kCoordinateComplexHermitian:
-        return "coordinate complex Hermitian";
-      case kCoordinateComplexSymmetric:
-        return "coordindate complex symmetric";
-      case kCoordinateIntegerGeneral:
-        return "coordinate integer general";
-      case kCoordinateIntegerSymmetric:
-        return "coordinate integer symmetric";
-      case kCoordinatePatternGeneral:
-        return "coordinate pattern general";
-      case kCoordinatePatternSymmetric:
-        return "coordinate pattern symmetric";
-      case kCoordinateRealGeneral:
-        return "coordinate real general";
+      case kUnknown: return "UNK";
+      case kArrayComplexGeneral: return "ACG";
+      case kArrayRealGeneral: return "ARG";
+      case kCoordinateComplexGeneral: return "CCG";
+      case kCoordinateComplexHermitian: return "CCH";
+      case kCoordinateComplexSymmetric: return "CCS";
+      case kCoordinateIntegerGeneral: return "CIG";
+      case kCoordinateIntegerSymmetric: return "CIS";
+      case kCoordinatePatternGeneral: return "CPG";
+      case kCoordinatePatternSymmetric: return "CPS";
+      case kCoordinateRealGeneral: return "CRG";
+      case kCoordinateRealSkewSymmetric: return "CRK";
+      case kCoordinateRealSymmetric: return "CRS";
+      default: return "UDF";
+    }
+  }
+
+  std::string ToLongString() const {
+    switch (val_) {
+      case kUnknown: return "unknown";
+      case kArrayComplexGeneral: return "array complex general";
+      case kArrayRealGeneral: return "array real general";
+      case kCoordinateComplexGeneral: return "coordinate complex general";
+      case kCoordinateComplexHermitian: return "coordinate complex Hermitian";
+      case kCoordinateComplexSymmetric: return "coordindate complex symmetric";
+      case kCoordinateIntegerGeneral: return "coordinate integer general";
+      case kCoordinateIntegerSymmetric: return "coordinate integer symmetric";
+      case kCoordinatePatternGeneral: return "coordinate pattern general";
+      case kCoordinatePatternSymmetric: return "coordinate pattern symmetric";
+      case kCoordinateRealGeneral: return "coordinate real general";
       case kCoordinateRealSkewSymmetric:
         return "coordinate real skew-symmetric";
-      case kCoordinateRealSymmetric:
-        return "coordinate real symmetric";
-      default:
-        return "undefined";
+      case kCoordinateRealSymmetric: return "coordinate real symmetric";
+      default: return "undefined";
     }
   }
 
-  std::string ToShortString() const {
-    switch (val_) {
-      case kUnknown:
-        return "UNK";
-      case kArrayComplexGeneral:
-        return "ACG";
-      case kArrayRealGeneral:
-        return "ARG";
-      case kCoordinateComplexGeneral:
-        return "CCG";
-      case kCoordinateComplexHermitian:
-        return "CCH";
-      case kCoordinateComplexSymmetric:
-        return "CCS";
-      case kCoordinateIntegerGeneral:
-        return "CIG";
-      case kCoordinateIntegerSymmetric:
-        return "CIS";
-      case kCoordinatePatternGeneral:
-        return "CPG";
-      case kCoordinatePatternSymmetric:
-        return "CPS";
-      case kCoordinateRealGeneral:
-        return "CRG";
-      case kCoordinateRealSkewSymmetric:
-        return "CRK";
-      case kCoordinateRealSymmetric:
-        return "CRS";
-      default:
-        return "UDF";
-    }
-  }
-
-  // Reads a null-terminated "C" string as a MatrixType short string.
+  // Reads a null-terminated "C" string as a MatrixType string.
   template<typename InputStreamType>
   absl::Status Read(InputStreamType *is, uint64_t *offset = nullptr) {
-    char buf[kShortStringLength + 1];
+    char buf[kStringLength + 1];
     if (!ReadData(is, buf, sizeof(buf)))
       return absl::InternalError("Error reading matrix type string");
-    if (strlen(buf) != kShortStringLength)
+    if (strlen(buf) != kStringLength)
       return absl::InternalError("Bad matrix type string: " + std::string(buf));
-    if (offset) *offset += kShortStringLength + 1; // +1 for the null terminator
-    val_ = MatrixType(FromShortString(buf));
+    if (offset) *offset += kStringLength + 1; // +1 for the null terminator
+    val_ = MatrixType(FromString(buf));
     return absl::OkStatus();
   }
 
@@ -209,20 +174,20 @@ public:
     return is;
   }
 
-  // Writes a MatrixType short string as a null-terminated "C" string.
+  // Writes a MatrixType string as a null-terminated "C" string.
   template<typename OutputStreamType>
   absl::Status Write(OutputStreamType *os) const {
-    auto str = ToShortString();
-    DCHECK_EQ(str.size(), kShortStringLength);
+    auto str = ToString();
+    DCHECK_EQ(str.size(), kStringLength);
     const char *buf = str.c_str();
-    DCHECK_EQ(buf[kShortStringLength], '\0');
-    if (!WriteData(os, buf, kShortStringLength + 1))
+    DCHECK_EQ(buf[kStringLength], '\0');
+    if (!WriteData(os, buf, kStringLength + 1))
       return absl::InternalError("Error writing matrix type string");
     return absl::OkStatus();
   }
 
 private:
-  Value val_;
+  Enum val_;
 };
 
 

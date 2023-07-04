@@ -19,6 +19,12 @@ int main(int argc, char **argv) {
 
   std::string prm_file = absl::GetFlag(FLAGS_prm_file);
   CHECK(!prm_file.empty()) << "Path to .prm file is missing";
+  auto types = pierank::PieRankFileTypes(prm_file);
+  if (!types.ok())
+    LOG(FATAL) << types.status().message();
+  auto [matrix_type, data_type] = *std::move(types);
+  if (matrix_type.IsComplex())
+    LOG(FATAL) << "Printing complex matrices are yet supported";
   pierank::SparseMatrix<uint32_t, uint64_t> mat(prm_file, /*mmap=*/true);
   uint64_t max_items = static_cast<uint64_t>(absl::GetFlag(FLAGS_max_items));
   std::cout << mat.DebugString(max_items);
