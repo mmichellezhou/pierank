@@ -17,15 +17,20 @@ int main(int argc, char **argv) {
   FLAGS_logtostderr = 1;
   absl::ParseCommandLine(argc, argv);
 
+  uint64_t max_items = static_cast<uint64_t>(absl::GetFlag(FLAGS_max_items));
   std::string prm_file = absl::GetFlag(FLAGS_prm_file);
   CHECK(!prm_file.empty()) << "Path to .prm file is missing";
   auto types = pierank::PieRankFileTypes(prm_file);
   if (!types.ok())
     LOG(FATAL) << types.status().message();
   auto [matrix_type, data_type] = *std::move(types);
-  if (matrix_type.IsComplex())
-    LOG(FATAL) << "Printing complex matrices are yet supported";
-  pierank::SparseMatrix<uint32_t, uint64_t> mat(prm_file, /*mmap=*/true);
-  uint64_t max_items = static_cast<uint64_t>(absl::GetFlag(FLAGS_max_items));
-  std::cout << mat.DebugString(max_items);
+  if (!matrix_type.IsComplex()) {
+    pierank::SparseMatrix <uint32_t, uint64_t> mat(prm_file, /*mmap=*/true);
+    std::cout << mat.DebugString(max_items);
+  } else {
+    using DataContainer = std::vector<std::complex<double>>;
+    pierank::SparseMatrix <uint32_t, uint64_t, DataContainer>
+        mat(prm_file, /*mmap=*/true);
+    std::cout << mat.DebugString(max_items);
+  }
 }

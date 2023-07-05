@@ -10,6 +10,7 @@
 #include <limits>
 #include <numeric>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 #include <glog/logging.h>
@@ -153,6 +154,10 @@ public:
   SparseMatrix(const SparseMatrix &) = delete;
 
   SparseMatrix &operator=(const SparseMatrix &) = delete;
+
+  SparseMatrix(SparseMatrix &&) = default;
+
+  SparseMatrix &operator=(SparseMatrix &&) = default;
 
   ValueType operator()(PosType pos0, PosType pos1) const {
     PosType non_idx_pos;
@@ -646,7 +651,8 @@ public:
     }
     ofs.close();
 
-    res.reset(new SparseMatrix<PosType, IdxType>(path, /*mmap=*/true));
+    res.reset(new SparseMatrix<PosType, IdxType, DataContainerType>(
+        path,/*mmap=*/true));
     return res;
   }
 
@@ -869,6 +875,48 @@ private:
   FlexPosType pos_;
   DataContainerType data_;
   mio::mmap_source data_mmap_;
+};
+
+template<typename PosType, typename IdxType>
+class SparseMatrixVar {
+public:
+  enum Enum : uint32_t {
+    kDouble,
+    kComplexDouble
+  };
+
+  SparseMatrixVar() = default;
+
+  void SetType(Enum type) {
+    var_.template emplace<type>();
+    type_ = type;
+  }
+
+  absl::Status ReadMatrixMarketFile(const std::string &path,
+                                    uint32_t bytes_per_pos = sizeof(PosType),
+                                    uint32_t bytes_per_idx = sizeof(IdxType)) {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).ReadMatrixMarketFile(
+          path, bytes_per_pos, bytes_per_idx);
+    else
+      return std::get<kComplexDouble>(var_).ReadMatrixMarketFile(
+          path, bytes_per_pos, bytes_per_idx);
+  }
+
+  absl::Status WritePieRankMatrixFile(const std::string &path) const {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).WritePieRankMatrixFile(path);
+    else
+      return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(path);
+  }
+
+private:
+  Enum type_ = kDouble;
+  std::variant<
+      SparseMatrix<PosType, IdxType, std::vector<double>>,
+      SparseMatrix<PosType, IdxType, std::vector<std::complex<double>>>> var_;
 };
 
 }  // namespace pierank

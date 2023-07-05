@@ -2,6 +2,8 @@
 // Created by Michelle Zhou on 9/3/22.
 //
 
+#include <variant>
+
 #include <glog/logging.h>
 
 #include "absl/flags/flag.h"
@@ -23,9 +25,12 @@ int main(int argc, char **argv) {
   FLAGS_logtostderr = 1;
   absl::ParseCommandLine(argc, argv);
 
-  pierank::SparseMatrix<uint32_t, uint64_t> mat;
   std::string mtx_file = absl::GetFlag(FLAGS_mtx_file);
   std::cout << "mtx_file: " << mtx_file << std::endl;
+  auto info = pierank::MatrixMarketFileInfo(mtx_file);
+  if (!info.ok()) LOG(FATAL) << info.status().message();
+  auto [matrix_type, rows, cols, nnz] = *std::move(info);
+
   std::string output_dir = absl::GetFlag(FLAGS_output_dir);
   bool change_index_dim = absl::GetFlag(FLAGS_output_row_major);
   std::string prm_file = pierank::MatrixMarketToPieRankMatrixPath(
@@ -33,31 +38,55 @@ int main(int argc, char **argv) {
   CHECK(!prm_file.empty()) << "Bad .mtx file: " << mtx_file;
   std::cout << "prm_file: " << prm_file << std::endl;
 
+  using SparseMatrix = std::variant<pierank::SparseMatrix<uint32_t, uint64_t>,
+      pierank::SparseMatrix<uint32_t, uint64_t, std::vector<std::complex<double>>>>;
+  SparseMatrix mat;
   pierank::Timer timer(absl::Now());
-  CHECK_OK(mat.ReadMatrixMarketFile(mtx_file));
+  if (!matrix_type.IsComplex()) {
+    mat.emplace<0>();
+    CHECK_OK(std::get<0>(mat).ReadMatrixMarketFile(mtx_file));
+  } else {
+    mat.emplace<1>();
+    CHECK_OK(std::get<1>(mat).ReadMatrixMarketFile(mtx_file));
+  }
   std::cout << "mtx_read_time_ms: " << timer.Stop() << std::endl;
 
   if (change_index_dim) {
     if (absl::GetFlag(FLAGS_change_index_in_ram)) {
+      auto max_nnz_per_thread = absl::GetFlag(FLAGS_max_nnz_per_thread);
       auto pool = std::make_shared<pierank::ThreadPool>(
           absl::GetFlag(FLAGS_max_threads));
       timer.Restart();
-      auto csr_or =
-          mat.ChangeIndexDim(pool, absl::GetFlag(FLAGS_max_nnz_per_thread));
-      std::cout << "index_time_ms: " << timer.Stop() << std::endl;
-      CHECK(csr_or.ok());
-      timer.Restart();
-      auto csr = std::move(csr_or).value();
-      CHECK_OK(csr->WritePieRankMatrixFile(prm_file));
+      if (!matrix_type.IsComplex()) {
+        auto csr_or = std::get<0>(mat).ChangeIndexDim(pool, max_nnz_per_thread);
+        CHECK(csr_or.ok());
+        std::cout << "index_time_ms: " << timer.Stop() << std::endl;
+        timer.Restart();
+        auto csr = std::move(csr_or).value();
+        CHECK_OK(csr->WritePieRankMatrixFile(prm_file));
+      } else {
+        auto csr_or = std::get<1>(mat).ChangeIndexDim(pool, max_nnz_per_thread);
+        CHECK(csr_or.ok());
+        std::cout << "index_time_ms: " << timer.Stop() << std::endl;
+        timer.Restart();
+        auto csr = std::move(csr_or).value();
+        CHECK_OK(csr->WritePieRankMatrixFile(prm_file));
+      }
       std::cout << "prm_write_time_ms: " << timer.Stop() << std::endl;
     } else {
       timer.Restart();
-      CHECK_OK(mat.ChangeIndexDim(prm_file));
+      if (!matrix_type.IsComplex())
+        CHECK_OK(std::get<0>(mat).ChangeIndexDim(prm_file));
+      else
+        CHECK_OK(std::get<1>(mat).ChangeIndexDim(prm_file));
       std::cout << "index_and_prm_write_time_ms: " << timer.Stop() << std::endl;
     }
   } else {
     timer.Restart();
-    CHECK_OK(mat.WritePieRankMatrixFile(prm_file));
+    if (!matrix_type.IsComplex())
+      CHECK_OK(std::get<0>(mat).WritePieRankMatrixFile(prm_file));
+    else
+      CHECK_OK(std::get<1>(mat).WritePieRankMatrixFile(prm_file));
     std::cout << "prm_write_time_ms: " << timer.Stop() << std::endl;
   }
 }

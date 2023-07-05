@@ -190,7 +190,6 @@ private:
   Enum val_;
 };
 
-
 class MatrixMarketIo {
 public:
   using Var =
@@ -318,6 +317,15 @@ private:
   MatrixType type_ = MatrixType::kUnknown;
   uint64_t count_ = 0;
 };
+
+// Tuple: <MatrixType, #rows, #cols, #nnz>
+inline absl::StatusOr<std::tuple<MatrixType, uint64_t, uint64_t, uint64_t>>
+MatrixMarketFileInfo(const std::string &mtx_path) {
+  std::tuple<MatrixType, uint64_t, uint64_t, uint64_t> res;
+  MatrixMarketIo mat(mtx_path);
+  if (!mat.ok()) return absl::InternalError("Bad matrix market file");
+  return std::make_tuple(mat.Type(), mat.Rows(), mat.Cols(), mat.NumNonZeros());
+}
 
 }  // namespace pierank
 
