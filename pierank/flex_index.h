@@ -196,6 +196,8 @@ public:
 
   FlexIndex &operator=(const FlexIndex &) = delete;
 
+  FlexIndex(FlexIndex &&) = default;
+
   FlexIndex &operator=(FlexIndex &&) = default;
 
   bool HasSketch() const { return sketch_bits_ > 0; }

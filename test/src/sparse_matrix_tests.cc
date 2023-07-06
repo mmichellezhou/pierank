@@ -84,7 +84,7 @@ TEST(SparseMatrixTests, ReadAsh219MtxFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
     auto mat_inverse = Transpose(mat);
     std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
-    EXPECT_OK(mat_inverse->WritePieRankMatrixFile(inverse_prm_path));
+    EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
   }
   SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
@@ -115,9 +115,9 @@ protected:
     EXPECT_OK(mat_inverse0.ReadPieRankMatrixFile(inverse_prm_file));
 
     auto mat_inverse = Transpose(mat);
-    if (index_dim) CheckAsh219RowIndex(*mat_inverse);
-    else CheckAsh219ColIndex(*mat_inverse);
-    EXPECT_EQ(*mat_inverse, mat_inverse0);
+    if (index_dim) CheckAsh219RowIndex(mat_inverse);
+    else CheckAsh219ColIndex(mat_inverse);
+    EXPECT_EQ(mat_inverse, mat_inverse0);
 
     auto tmp_dir = MakeTmpDir("./");
     CHECK(!tmp_dir.empty());
@@ -127,9 +127,9 @@ protected:
     auto mat_inverse_mmap_or = mat.ChangeIndexDim(tmp_path, kMaxNnzPerRange);
     EXPECT_OK(mat_inverse_mmap_or);
     auto mat_inverse_mmap = std::move(mat_inverse_mmap_or).value();
-    if (index_dim) CheckAsh219RowIndex(*mat_inverse_mmap);
-    else CheckAsh219ColIndex(*mat_inverse_mmap);
-    EXPECT_EQ(*mat_inverse_mmap, mat_inverse0);
+    if (index_dim) CheckAsh219RowIndex(mat_inverse_mmap);
+    else CheckAsh219ColIndex(mat_inverse_mmap);
+    EXPECT_EQ(mat_inverse_mmap, mat_inverse0);
 
     SparseMatrix<uint32_t, uint64_t> mat_inverse2(tmp_path);
     EXPECT_TRUE(mat_inverse2.ok());

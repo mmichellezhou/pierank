@@ -27,9 +27,8 @@ int main(int argc, char **argv) {
 
   std::string mtx_file = absl::GetFlag(FLAGS_mtx_file);
   std::cout << "mtx_file: " << mtx_file << std::endl;
-  auto info = pierank::MatrixMarketFileInfo(mtx_file);
-  if (!info.ok()) LOG(FATAL) << info.status().message();
-  auto [matrix_type, rows, cols, nnz] = *std::move(info);
+  auto matrix_type = pierank::MatrixMarketFileMatrixType(mtx_file);
+  CHECK_NE(matrix_type, pierank::MatrixType::kUnknown);
 
   std::string output_dir = absl::GetFlag(FLAGS_output_dir);
   bool change_index_dim = absl::GetFlag(FLAGS_output_row_major);
@@ -63,14 +62,14 @@ int main(int argc, char **argv) {
         std::cout << "index_time_ms: " << timer.Stop() << std::endl;
         timer.Restart();
         auto csr = std::move(csr_or).value();
-        CHECK_OK(csr->WritePieRankMatrixFile(prm_file));
+        CHECK_OK(csr.WritePieRankMatrixFile(prm_file));
       } else {
         auto csr_or = std::get<1>(mat).ChangeIndexDim(pool, max_nnz_per_thread);
         CHECK(csr_or.ok());
         std::cout << "index_time_ms: " << timer.Stop() << std::endl;
         timer.Restart();
         auto csr = std::move(csr_or).value();
-        CHECK_OK(csr->WritePieRankMatrixFile(prm_file));
+        CHECK_OK(csr.WritePieRankMatrixFile(prm_file));
       }
       std::cout << "prm_write_time_ms: " << timer.Stop() << std::endl;
     } else {

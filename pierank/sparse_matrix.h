@@ -510,13 +510,13 @@ public:
     return MaxRanges(max_nnz_per_range, pool ? pool->Size() : 1);
   }
 
-  absl::StatusOr<UniquePtr>
+  absl::StatusOr<SparseMatrix<PosType, IdxType, DataContainerType>>
   ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
                  uint64_t max_nnz_per_thread = 8000000) const {
     auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
-    auto&& nnz = CountNonIndexDimNnz();
-    auto&& idx = ReverseIndex(nnz);
+    auto nnz = CountNonIndexDimNnz();
+    auto idx = ReverseIndex(nnz);
     auto ranges =
         SplitIndexDimByNnz(idx, nnz_, MaxRanges(max_nnz_per_thread, pool));
     // std::cout << PosRangesDebugString(ranges);
@@ -525,8 +525,7 @@ public:
     nnz.Reset();
 
     if (ranges.size() == 1) {
-      ChangeIndexInRange(ranges, offsets, 0, idx, &nnz, &res->pos_,
-                         &res->data_);
+      ChangeIndexInRange(ranges, offsets, 0, idx, &nnz, &res.pos_, &res.data_);
     } else {
       std::vector<FlexPosType> poses(ranges.size());
       std::vector<DataContainerType> datas(ranges.size());
@@ -539,28 +538,29 @@ public:
                                  &datas[r]);
             }
           });
-      res->pos_.SetItemSize(poses.front().ItemSize());
+      res.pos_.SetItemSize(poses.front().ItemSize());
       for (auto &pos : poses) {
-        res->pos_.Append(pos);
+        res.pos_.Append(pos);
         pos.clear();
       }
       for (auto &data : datas) {
-        res->data_.insert(res->data_.end(), data.begin(), data.end());
+        res.data_.insert(res.data_.end(), data.begin(), data.end());
         data.clear();
       }
     }
-    res->index_ = std::move(idx);
-    return res;
+    res.index_ = std::move(idx);
+    return std::move(res);
   }
 
   // Returns a memory-mapped SparseMatrix with its index dim changed.
-  absl::StatusOr<UniquePtr> ChangeIndexDim(
+  absl::StatusOr<SparseMatrix<PosType, IdxType, DataContainerType>>
+  ChangeIndexDim(
       const std::string &path,
       uint64_t max_nnz_per_range = 64000000) const {
-    auto res = CopyOnlyDimInfo(/*change_index_dim=*/true);
+    auto mat = CopyOnlyDimInfo(/*change_index_dim=*/true);
 
-    auto&& nnz = CountNonIndexDimNnz();
-    auto&& idx = ReverseIndex(nnz);
+    auto nnz = CountNonIndexDimNnz();
+    auto idx = ReverseIndex(nnz);
     auto ranges = SplitIndexDimByNnz(idx, nnz_, MaxRanges(max_nnz_per_range));
     // std::cout << PosRangesDebugString(ranges);
 
@@ -599,19 +599,19 @@ public:
           std::make_tuple(pos.size(), pos.ItemSize(), pos_file, val_file));
     }
     DCHECK_GE(pos_min, 0);
-    DCHECK_LT(pos_max, res->index_dim_ ? res->rows_ : res->cols_);
+    DCHECK_LT(pos_max, mat.index_dim_ ? mat.rows_ : mat.cols_);
     DCHECK_EQ(tmp_file_infos.size(), ranges.size());
 
     auto file_or = OpenWriteFile(path);
     if (!file_or.ok()) return file_or.status();
     auto ofs = *std::move(file_or);
-    res->index_ = std::move(idx);
-    res->WriteAllButPosAndData(&ofs);
-    res->pos_.SetMinMaxValues(pos_min, pos_max);
+    mat.index_ = std::move(idx);
+    mat.WriteAllButPosAndData(&ofs);
+    mat.pos_.SetMinMaxValues(pos_min, pos_max);
     auto[pos_item_size, pos_shift_by_min_val] = FlexPosType::MinEncode(pos_max,
                                                                        pos_min);
     PosType pos_value_shift = pos_shift_by_min_val ? -pos_min : 0;
-    res->pos_.WriteAllButValues(&ofs, pos_item_size, pos_shift_by_min_val);
+    mat.pos_.WriteAllButValues(&ofs, pos_item_size, pos_shift_by_min_val);
     if (!WriteUint64(&ofs, pos_item_size * nnz_))
       return absl::InternalError("Error write file: " + path);
     uint64_t total_items = 0;
@@ -629,7 +629,7 @@ public:
     CHECK_EQ(total_items, nnz_);
 
     auto data_size = has_data ? nnz_ : 0;  // 0 for pattern matrices
-    // Write size of res->data_
+    // Write size of mat.data_
     if (!WriteUint64(&ofs, data_size))
       return absl::InternalError("Error write file: " + path);
     if (has_data) {
@@ -651,9 +651,9 @@ public:
     }
     ofs.close();
 
-    res.reset(new SparseMatrix<PosType, IdxType, DataContainerType>(
-        path,/*mmap=*/true));
-    return res;
+    auto out = new SparseMatrix<PosType, IdxType, DataContainerType>(
+        path,/*mmap=*/true);
+    return std::move(*out);
   }
 
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
@@ -778,47 +778,47 @@ protected:
     return true;
   }
 
-  UniquePtr CopyOnlyDimInfo(bool change_index_dim = false) const {
-    auto res =
-        std::make_unique<SparseMatrix<PosType, IdxType, DataContainerType>>();
-    res->mtype_ = mtype_;
-    res->dtype_ = dtype_;
-    res->rows_ = rows_;
-    res->cols_ = cols_;
-    res->nnz_ = nnz_;
+  SparseMatrix<PosType, IdxType, DataContainerType>
+  CopyOnlyDimInfo(bool change_index_dim = false) const {
+    SparseMatrix<PosType, IdxType, DataContainerType> res;
+    res.mtype_ = mtype_;
+    res.dtype_ = dtype_;
+    res.rows_ = rows_;
+    res.cols_ = cols_;
+    res.nnz_ = nnz_;
     if (change_index_dim)
-      res->index_dim_ = index_dim_ ? 0 : 1;
+      res.index_dim_ = index_dim_ ? 0 : 1;
     else
-      res->index_dim_ = index_dim_;
+      res.index_dim_ = index_dim_;
     return res;
   }
 
-  FlexPosType&& CountNonIndexDimNnz() const {
+  FlexPosType CountNonIndexDimNnz() const {
     PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
-    auto pos = new FlexPosType(pos_.ItemSize(), non_index_dim_size);
+    FlexPosType pos(pos_.ItemSize(), non_index_dim_size);
     auto index_pos_end = this->IndexPosEnd();
     for (PosType p = 0; p < index_pos_end; ++p) {
       for (IdxType i = index_[p]; i < index_[p + 1]; ++i)
-        pos->IncItem(pos_[i]);
+        pos.IncItem(pos_[i]);
     }
-    return std::move(*pos);
+    return pos;
   }
 
-  FlexIdxType&& ReverseIndex(const FlexPosType &nbr) const {
+  FlexIdxType ReverseIndex(const FlexPosType &nbr) const {
     auto [idx_item_size, idx_shift_by_min_val] = index_.MinEncode();
     CHECK(!idx_shift_by_min_val) << "Not yet supported";
-    auto idx = new FlexIdxType(idx_item_size);
+    FlexIdxType idx(idx_item_size);
     IdxType nnz = 0;
     PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
     for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
-      idx->push_back(nnz);
+      idx.push_back(nnz);
       nnz += nbr[p];
     }
     DCHECK_EQ(nnz, nnz_);
-    if ((*idx)[idx->size() - 1] != nnz)
-      idx->push_back(nnz);
+    if (idx[idx.size() - 1] != nnz)
+      idx.push_back(nnz);
 
-    return std::move(*idx);
+    return idx;
   }
 
   std::vector<IdxType> RangeNnzOffsets(const PosRanges &ranges) const {
@@ -888,13 +888,23 @@ public:
   SparseMatrixVar() = default;
 
   void SetType(Enum type) {
-    var_.template emplace<type>();
+    if (type == kDouble)
+      var_.template emplace<0>();
+    else
+      var_.template emplace<1>();
     type_ = type;
   }
 
   absl::Status ReadMatrixMarketFile(const std::string &path,
                                     uint32_t bytes_per_pos = sizeof(PosType),
                                     uint32_t bytes_per_idx = sizeof(IdxType)) {
+    auto mtype = MatrixMarketFileMatrixType(path);
+    if (mtype == MatrixType::kUnknown)
+      return absl::InternalError("Bad or missing matrix file: " + path);
+    if (!mtype.IsComplex())
+      SetType(kDouble);
+    else
+      SetType(kComplexDouble);
     auto idx = var_.index();
     if (idx == kDouble)
       return std::get<kDouble>(var_).ReadMatrixMarketFile(

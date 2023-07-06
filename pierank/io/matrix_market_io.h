@@ -327,6 +327,16 @@ MatrixMarketFileInfo(const std::string &mtx_path) {
   return std::make_tuple(mat.Type(), mat.Rows(), mat.Cols(), mat.NumNonZeros());
 }
 
+inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
+  auto info = MatrixMarketFileInfo(mtx_path);
+  if (!info.ok()) {
+    LOG(ERROR) << info.status().message();
+    return MatrixType::kUnknown;
+  }
+  auto [type, rows, cols, nnz] = *std::move(info);
+  return type;
+}
+
 }  // namespace pierank
 
 #endif //PIERANK_IO_MATRIX_MARKET_IO_H_
