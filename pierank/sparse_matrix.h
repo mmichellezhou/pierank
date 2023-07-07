@@ -885,7 +885,31 @@ public:
     kComplexDouble
   };
 
+  using SparseMatrixDouble =
+      SparseMatrix<PosType, IdxType, std::vector<double>>;
+
+  using SparseMatrixComplexDouble =
+      SparseMatrix<PosType, IdxType, std::vector<std::complex<double>>>;
+
   SparseMatrixVar() = default;
+
+  SparseMatrixVar(const SparseMatrixVar &) = delete;
+
+  SparseMatrixVar &operator=(const SparseMatrixVar &) = delete;
+
+  SparseMatrixVar(SparseMatrixVar &&) = default;
+
+  SparseMatrixVar &operator=(SparseMatrixVar &&) = default;
+
+  SparseMatrixVar(SparseMatrixDouble &&other) {
+    type_ = kDouble;
+    var_.template emplace<0>(std::forward<SparseMatrixDouble>(other));
+  }
+
+  SparseMatrixVar(SparseMatrixComplexDouble &&other) {
+    type_ = kComplexDouble;
+    var_.template emplace<1>(std::forward<SparseMatrixComplexDouble>(other));
+  }
 
   void SetType(Enum type) {
     if (type == kDouble)
@@ -920,6 +944,28 @@ public:
       return std::get<kDouble>(var_).WritePieRankMatrixFile(path);
     else
       return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(path);
+  }
+
+  absl::StatusOr<SparseMatrixVar<PosType, IdxType>>
+  ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
+                 uint64_t max_nnz_per_thread = 8000000) const {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).ChangeIndexDim(pool, max_nnz_per_thread);
+    else
+      return std::get<kComplexDouble>(var_).ChangeIndexDim(pool,
+                                                           max_nnz_per_thread);
+  }
+
+  absl::StatusOr<SparseMatrixVar<PosType, IdxType>>
+  ChangeIndexDim(const std::string &path,
+                 uint64_t max_nnz_per_range = 64000000) const {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).ChangeIndexDim(path, max_nnz_per_range);
+    else
+      return std::get<kComplexDouble>(var_).ChangeIndexDim(path,
+                                                           max_nnz_per_range);
   }
 
 private:
