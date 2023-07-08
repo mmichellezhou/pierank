@@ -911,6 +911,15 @@ public:
     var_.template emplace<1>(std::forward<SparseMatrixComplexDouble>(other));
   }
 
+  SparseMatrixVar(const std::string &prm_path, bool mmap = false) {
+    status_ = mmap ? this->MmapPieRankMatrixFile(prm_path)
+                   : this->ReadPieRankMatrixFile(prm_path);
+  }
+
+  bool ok() const { return status_.ok(); }
+
+  absl::Status status() const { return status_; }
+
   void SetType(Enum type) {
     if (type == kDouble)
       var_.template emplace<0>();
@@ -919,31 +928,58 @@ public:
     type_ = type;
   }
 
-  absl::Status ReadMatrixMarketFile(const std::string &path,
-                                    uint32_t bytes_per_pos = sizeof(PosType),
-                                    uint32_t bytes_per_idx = sizeof(IdxType)) {
-    auto mtype = MatrixMarketFileMatrixType(path);
-    if (mtype == MatrixType::kUnknown)
-      return absl::InternalError("Bad or missing matrix file: " + path);
-    if (!mtype.IsComplex())
+  void SetType(MatrixType type) {
+    if (!type.IsComplex())
       SetType(kDouble);
     else
       SetType(kComplexDouble);
+  }
+
+  absl::Status SetTypeFromMatrixMarketFile(const std::string &mtx_path) {
+    auto matrix_type = MatrixMarketFileMatrixType(mtx_path);
+    if (matrix_type == MatrixType::kUnknown)
+      return absl::InternalError("Bad or missing matrix file: " + mtx_path);
+    SetType(matrix_type);
+    return absl::OkStatus();
+  }
+
+  absl::Status SetTypeFromPieRankMatrixFile(const std::string &prm_path) {
+    auto types = PieRankFileTypes(prm_path);
+    if (!types.ok()) return types.status();
+    auto[matrix_type, data_type] = *std::move(types);
+    SetType(matrix_type);
+    return absl::OkStatus();
+  }
+
+  absl::Status ReadMatrixMarketFile(const std::string &mtx_path,
+                                    uint32_t bytes_per_pos = sizeof(PosType),
+                                    uint32_t bytes_per_idx = sizeof(IdxType)) {
+    auto status = SetTypeFromMatrixMarketFile(mtx_path);
+    if (!status.ok()) return status;
+
     auto idx = var_.index();
     if (idx == kDouble)
       return std::get<kDouble>(var_).ReadMatrixMarketFile(
-          path, bytes_per_pos, bytes_per_idx);
+          mtx_path, bytes_per_pos, bytes_per_idx);
     else
       return std::get<kComplexDouble>(var_).ReadMatrixMarketFile(
-          path, bytes_per_pos, bytes_per_idx);
+          mtx_path, bytes_per_pos, bytes_per_idx);
   }
 
-  absl::Status WritePieRankMatrixFile(const std::string &path) const {
+  absl::Status ReadPieRankMatrixFile(const std::string &prm_path) {
     auto idx = var_.index();
     if (idx == kDouble)
-      return std::get<kDouble>(var_).WritePieRankMatrixFile(path);
+      return std::get<kDouble>(var_).ReadPieRankMatrixFile(prm_path);
     else
-      return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(path);
+      return std::get<kComplexDouble>(var_).ReadPieRankMatrixFile(prm_path);
+  }
+
+  absl::Status WritePieRankMatrixFile(const std::string &prm_path) const {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).WritePieRankMatrixFile(prm_path);
+    else
+      return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(prm_path);
   }
 
   absl::StatusOr<SparseMatrixVar<PosType, IdxType>>
@@ -967,6 +1003,28 @@ public:
       return std::get<kComplexDouble>(var_).ChangeIndexDim(path,
                                                            max_nnz_per_range);
   }
+
+  absl::Status MmapPieRankMatrixFile(const std::string &prm_path) {
+    auto status = SetTypeFromPieRankMatrixFile(prm_path);
+    if (!status.ok()) return status;
+
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).MmapPieRankMatrixFile(prm_path);
+    else
+      return std::get<kComplexDouble>(var_).MmapPieRankMatrixFile(prm_path);
+  }
+
+  std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
+    auto idx = var_.index();
+    if (idx == kDouble)
+      return std::get<kDouble>(var_).DebugString(max_items, indent);
+    else
+      return std::get<kComplexDouble>(var_).DebugString(max_items, indent);
+  }
+
+protected:
+  absl::Status status_;
 
 private:
   Enum type_ = kDouble;
