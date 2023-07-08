@@ -10,7 +10,7 @@ using namespace std;
 using namespace pierank;
 
 TEST(FlexIndex, AddElems) {
-  FlexIndex<uint32_t> index(3);
+  FlexArray<uint32_t> index(3);
   index.push_back(123);
   EXPECT_EQ(index[0], 123);
   index.push_back(234);

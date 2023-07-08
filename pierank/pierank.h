@@ -1,9 +1,12 @@
 #ifndef PIERANK_PIERANK_H
 #define PIERANK_PIERANK_H
 
-#include "pierank/flex_index.h"
+#include "pierank/data_type.h"
+#include "pierank/flex_array.h"
 #include "pierank/macros.h"
+#include "pierank/math_utils.h"
 #include "pierank/sparse_matrix.h"
+#include "pierank/string_utils.h"
 #include "pierank/thread_pool.h"
 #include "pierank/time_utils.h"
 

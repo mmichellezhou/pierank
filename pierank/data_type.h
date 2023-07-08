@@ -5,6 +5,15 @@
 #ifndef PIERANK_DATA_TYPE_H_
 #define PIERANK_DATA_TYPE_H_
 
+#include <complex>
+
+#include <glog/logging.h>
+
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
+
+#include "pierank/io/file_utils.h"
+
 namespace pierank {
 
 class DataType {

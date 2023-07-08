@@ -2,8 +2,8 @@
 // Created by Michelle Zhou on 2/22/22.
 //
 
-#ifndef PIERANK_FLEX_INDEX_H_
-#define PIERANK_FLEX_INDEX_H_
+#ifndef PIERANK_FLEX_ARRAY_H_
+#define PIERANK_FLEX_ARRAY_H_
 
 #include <cstdint>
 #include <iostream>
@@ -46,20 +46,20 @@ namespace pierank {
   } while(0)
 
 template<typename T>
-class FlexIndex {
+class FlexArray {
 public:
   struct Iterator {
     using iterator_category = std::random_access_iterator_tag;
     using difference_type   = std::ptrdiff_t;
     using value_type        = T;
-    using pointer           = const FlexIndex<T> *;  // not the ordinary T*
+    using pointer           = const FlexArray<T> *;  // not the ordinary T*
     using reference         = void;  // not the ordinary T&
 
     Iterator() = default;
 
     Iterator(const Iterator &rhs) = default;
 
-    Iterator(const FlexIndex<T> &index, uint64_t idx) :
+    Iterator(const FlexArray<T> &index, uint64_t idx) :
         index_(&index), idx_(idx),
         ptr_(index_->Data() + idx * index_->item_size_) {}
 
@@ -159,7 +159,7 @@ public:
     }
 
   private:
-    const FlexIndex<T> *index_ = nullptr;
+    const FlexArray<T> *index_ = nullptr;
     difference_type idx_ = 0;
     const char *ptr_ = nullptr;
   };
@@ -182,23 +182,23 @@ public:
     return std::make_pair(encode_size_without_shift, false);
   }
 
-  explicit FlexIndex(uint32_t item_size = sizeof(T)) : item_size_(item_size) {
+  explicit FlexArray(uint32_t item_size = sizeof(T)) : item_size_(item_size) {
     CHECK_GT(item_size_, 0);
     CHECK_LE(item_size_, sizeof(T));
     CHECK_LE(item_size_, 8);
   }
 
-  FlexIndex(uint32_t item_size, uint64_t num_items) :
+  FlexArray(uint32_t item_size, uint64_t num_items) :
       item_size_(item_size), num_items_(num_items),
       vals_(item_size * num_items, '\0') {}
 
-  FlexIndex(const FlexIndex &) = delete;
+  FlexArray(const FlexArray &) = delete;
 
-  FlexIndex &operator=(const FlexIndex &) = delete;
+  FlexArray &operator=(const FlexArray &) = delete;
 
-  FlexIndex(FlexIndex &&) = default;
+  FlexArray(FlexArray &&) = default;
 
-  FlexIndex &operator=(FlexIndex &&) = default;
+  FlexArray &operator=(FlexArray &&) = default;
 
   bool HasSketch() const { return sketch_bits_ > 0; }
 
@@ -235,7 +235,7 @@ public:
     ++num_items_;
   }
 
-  void Append(const FlexIndex<T> &other) {
+  void Append(const FlexArray<T> &other) {
     DCHECK(vals_mmap_.empty());
     DCHECK_EQ(item_size_, other.item_size_);
     DCHECK_EQ(shift_by_min_val_, other.shift_by_min_val_);
@@ -360,7 +360,7 @@ public:
     return MinEncode(max_val_, min_val_);
   }
 
-  friend bool operator==(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
+  friend bool operator==(const FlexArray<T> &lhs, const FlexArray<T> &rhs) {
     if (lhs.num_items_ != rhs.num_items_) return false;
     if (lhs.item_size_ == rhs.item_size_ && lhs.Bytes() == rhs.Bytes()
         && lhs.sketch_bits_ == rhs.sketch_bits_) {
@@ -373,7 +373,7 @@ public:
     return true;
   }
 
-  friend bool operator!=(const FlexIndex<T> &lhs, const FlexIndex<T> &rhs) {
+  friend bool operator!=(const FlexArray<T> &lhs, const FlexArray<T> &rhs) {
     return !(lhs == rhs);
   }
 
@@ -559,14 +559,14 @@ public:
     return size ? ReadData<InputStreamType, T>(is, sketch_.data(), size) : true;
   }
 
-  friend std::ostream &operator<<(std::ostream &os, const FlexIndex &index) {
+  friend std::ostream &operator<<(std::ostream &os, const FlexArray &index) {
     auto status = index.Write(&os);
     if (!status.ok())
       os << status.message();
     return os;
   }
 
-  friend std::istream &operator>>(std::istream &is, FlexIndex &index) {
+  friend std::istream &operator>>(std::istream &is, FlexArray &index) {
     auto status = index.Read(&is);
     if (!status.ok())
       LOG(ERROR) << status.message();
@@ -638,7 +638,7 @@ public:
   void clear() {
     if (vals_mmap_.size())
       vals_mmap_.unmap();
-    *this = std::move(FlexIndex());
+    *this = std::move(FlexArray());
   }
 
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
@@ -682,5 +682,5 @@ private:
 
 }  // namespace pierank
 
-#endif //PIERANK_FLEX_INDEX_H_
+#endif //PIERANK_FLEX_ARRAY_H_
 

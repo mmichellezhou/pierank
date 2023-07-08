@@ -22,7 +22,7 @@
 #include "absl/strings/strip.h"
 
 #include "pierank/data_type.h"
-#include "pierank/flex_index.h"
+#include "pierank/flex_array.h"
 #include "pierank/math_utils.h"
 #include "pierank/string_utils.h"
 #include "pierank/thread_pool.h"
@@ -127,11 +127,11 @@ public:
   // PosRanges for InitRanges, UpdateRanges, and SyncRanges
   using TriplePosRanges = std::array<PosRanges, 3>;
 
-  using FlexIdxType = FlexIndex<IdxType>;
+  using FlexIdxType = FlexArray<IdxType>;
 
   using FlexIdxIterator = typename FlexIdxType::Iterator;
 
-  using FlexPosType = FlexIndex<PosType>;
+  using FlexPosType = FlexArray<PosType>;
 
   using FlexPosIterator = typename FlexPosType::Iterator;
 
