@@ -172,6 +172,8 @@ public:
 
   using SignedT = std::make_signed_t<T>;
 
+  using value_type = T;
+
   static std::pair<uint32_t, bool> MinEncode(T max_val, T min_val = 0) {
     uint32_t encode_size_without_shift = MinEncodeSize(max_val);
     uint32_t encode_size_with_shift = MinEncodeSize(max_val - min_val);
@@ -337,6 +339,15 @@ public:
     DCHECK_EQ(Bytes() % item_size_, 0);
     DCHECK_EQ(num_items_, Bytes() / item_size_);
     return num_items_;
+  }
+
+  inline bool empty() const { return size() == 0; }
+
+  inline void resize(std::size_t num_items) {
+    CHECK(vals_mmap_.empty());
+    CHECK(!sketch_bits_);
+    vals_.resize(num_items * item_size_);
+    num_items_ = num_items;
   }
 
   T MinValue() const { return min_val_; }

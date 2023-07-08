@@ -16,12 +16,23 @@
 
 namespace pierank {
 
+template<typename T, template<typename...> class Template>
+struct is_specialization : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct is_specialization<Template<Args...>, Template>: std::true_type {};
+
+template<typename T, template<typename...> class Template>
+inline constexpr bool is_specialization_v =
+    is_specialization<T, Template>::value;
+
 class DataType {
 public:
   constexpr static std::size_t kMaxStringLength = 3;
 
   enum Enum : uint32_t {
     kUnknown,
+    kFlex,
     kInt8,
     kUint8,
     kInt16,
@@ -39,6 +50,7 @@ public:
 
   static Enum FromString(absl::string_view str) {
     if (str == "unknown") return kUnknown;
+    if (str == "fx") return kFlex;
     if (str == "i8") return kInt8;
     if (str == "u8") return kUint8;
     if (str == "i16") return kInt16;
@@ -55,6 +67,7 @@ public:
     return kUnknown;
   }
 
+  // Does not return kFlex.
   template<typename ValueType>
   static Enum FromValueType() {
     if constexpr (std::is_same_v<ValueType, int8_t>) return kInt8;
@@ -80,8 +93,11 @@ public:
 
   DataType(absl::string_view str) : val_(FromString(str)) {}
 
+  inline bool IsFlex() const { return val_ == kFlex; }
+
   inline bool IsInteger() const {
-    return val_ == kInt8 || val_ == kUint8 ||
+    return val_ == kFlex ||
+           val_ == kInt8 || val_ == kUint8 ||
            val_ == kInt16 || val_ == kUint16 ||
            val_ == kInt32 || val_ == kUint32 ||
            val_ == kInt64 || val_ == kUint64;
@@ -104,6 +120,7 @@ public:
   std::string ToString() const {
     switch (val_) {
       case kUnknown: return "unk";
+      case kFlex: return "fx";
       case kInt8: return "i8";
       case kUint8: return "u8";
       case kInt16: return "i16";

@@ -115,8 +115,8 @@ template<typename SrcType, typename DestType>
 inline bool ConvertAndWriteInteger(std::ostream *os, SrcType src_val) {
   static_assert(std::is_integral_v<SrcType>);
   static_assert(std::is_integral_v<DestType>);
-  DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
-  DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
+  DCHECK_LE(static_cast<double>(src_val), std::numeric_limits<DestType>::max());
+  DCHECK_GE(static_cast<double>(src_val), std::numeric_limits<DestType>::min());
   DestType dest_val = static_cast<DestType>(src_val);
   return static_cast<bool>(os->write(reinterpret_cast<char *>(&dest_val),
                                      sizeof(dest_val)));
@@ -136,8 +136,8 @@ template<typename SrcType, typename DestType>
 inline bool ConvertAndWriteInteger(FILE *fp, SrcType src_val) {
   static_assert(std::is_integral_v<SrcType>);
   static_assert(std::is_integral_v<DestType>);
-  DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
-  DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
+  DCHECK_LE(static_cast<double>(src_val), std::numeric_limits<DestType>::max());
+  DCHECK_GE(static_cast<double>(src_val), std::numeric_limits<DestType>::min());
   DestType dest_val = static_cast<DestType>(src_val);
   return fwrite(reinterpret_cast<const char *>(&dest_val),
                 sizeof(dest_val), 1, fp)
@@ -244,8 +244,30 @@ WriteData<FILE, uint64_t>(FILE *fp, const uint64_t *data, uint64_t size) {
 
 template<>
 inline bool
-WriteData<std::ostream, double>(std::ostream *os, const double *data,
+WriteData<std::ostream, int64_t>(std::ostream *os, const int64_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<std::ofstream, int64_t>(std::ofstream *ofs, const int64_t *data,
                                   uint64_t size) {
+  return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
+                                      size * sizeof(*data)));
+}
+
+template<>
+inline bool
+WriteData<FILE, int64_t>(FILE *fp, const int64_t *data, uint64_t size) {
+  return fwrite(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
+WriteData<std::ostream, double>(std::ostream *os, const double *data,
+                                uint64_t size) {
   return static_cast<bool>(os->write(reinterpret_cast<const char *>(data),
                                      size * sizeof(*data)));
 }
@@ -253,7 +275,7 @@ WriteData<std::ostream, double>(std::ostream *os, const double *data,
 template<>
 inline bool
 WriteData<std::ofstream, double>(std::ofstream *ofs, const double *data,
-                                   uint64_t size) {
+                                 uint64_t size) {
   return static_cast<bool>(ofs->write(reinterpret_cast<const char *>(data),
                                       size * sizeof(*data)));
 }
@@ -445,6 +467,27 @@ inline bool ReadData<FILE, uint64_t>(FILE *fp, uint64_t *data, uint64_t size) {
 
 template<>
 inline bool
+ReadData<std::istream, int64_t>(std::istream *is, int64_t *data,
+                                uint64_t size) {
+  return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
+                                    size * sizeof(*data)));
+}
+
+template<>
+inline bool
+ReadData<std::ifstream, int64_t>(std::ifstream *ifs, int64_t *data,
+                                 uint64_t size) {
+  return static_cast<bool>(ifs->read(reinterpret_cast<char *>(data),
+                                     size * sizeof(*data)));
+}
+
+template<>
+inline bool ReadData<FILE, int64_t>(FILE *fp, int64_t *data, uint64_t size) {
+  return fread(data, sizeof(*data), size, fp) == size;
+}
+
+template<>
+inline bool
 ReadData<std::istream, double>(std::istream *is, double *data,
                                uint64_t size) {
   return static_cast<bool>(is->read(reinterpret_cast<char *>(data),
@@ -545,8 +588,8 @@ inline DestType ReadAndConvertInteger(InputStreamType *is,
     *offset += sizeof(src_val);
   if (!ReadData<InputStreamType, SrcType>(is, &src_val, 1))
     return std::numeric_limits<DestType>::max();
-  DCHECK_LE(src_val, std::numeric_limits<DestType>::max());
-  DCHECK_GE(src_val, std::numeric_limits<DestType>::min());
+  DCHECK_LE(static_cast<double>(src_val), std::numeric_limits<DestType>::max());
+  DCHECK_GE(static_cast<double>(src_val), std::numeric_limits<DestType>::min());
   return static_cast<DestType>(src_val);
 }
 

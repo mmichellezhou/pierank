@@ -2,6 +2,7 @@
 // Created by Michelle Zhou on 2/26/22.
 //
 
+#include "absl/strings/str_replace.h"
 #include "gtest/gtest.h"
 #include "pierank/pierank.h"
 #include "status_matcher.h"
@@ -12,6 +13,16 @@ using namespace std;
 using namespace pierank;
 
 static bool kGeneratePieRankMatrixFile = false;
+
+using Pos2d = pair<uint32_t, uint32_t>;
+
+template<typename M, typename V>
+void CheckMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
+  for (auto && [pos2d, value] : entries) {
+    auto && [row, col] = pos2d;
+    EXPECT_EQ(mat(row, col), value);
+  }
+}
 
 void CheckAsh219Common(const SparseMatrix<uint32_t, uint64_t> &mat) {
   EXPECT_EQ(mat.Rows(), 219);
@@ -150,19 +161,18 @@ INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, PieRankMatrixTestFixture,
                       TestDataFilePath("ash219.i1.prm"))
 );
 
+vector<pair<Pos2d, double>> B1ssMatrixTestEntries() {
+  return { {{0, 0}, 0}, {{4, 0}, -0.03599942}, {{5, 0}, -0.0176371},
+           {{6, 0}, -0.007721779}, {{0, 1}, 1}, {{1, 1}, -1}, {{6, 6}, 1} };
+}
+
 TEST(SparseMatrixTests, ReadB1ssMtxFile) {
   auto file_path = TestDataFilePath("b1_ss.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 0), 0);
-  EXPECT_DOUBLE_EQ(mat(4, 0), -0.03599942);
-  EXPECT_DOUBLE_EQ(mat(5, 0), -0.0176371);
-  EXPECT_DOUBLE_EQ(mat(6, 0), -0.007721779);
-  EXPECT_DOUBLE_EQ(mat(0, 1), 1);
-  EXPECT_DOUBLE_EQ(mat(1, 1), -1);
-  EXPECT_DOUBLE_EQ(mat(6, 6), 1);
+  CheckMatrix(mat, B1ssMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -170,6 +180,11 @@ TEST(SparseMatrixTests, ReadB1ssMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, double>> Bcsstm01MatrixTestEntries() {
+  return { {{0, 1}, 0}, {{0, 0}, 100}, {{10, 10}, 0}, {{25, 25}, 200},
+           {{32, 32}, 200}, {{41, 41}, 0}, {{42, 42}, 200}, {{47, 47}, 0} };
 }
 
 TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
@@ -178,14 +193,7 @@ TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 1), 0);
-  EXPECT_EQ(mat(0, 0), 100);
-  EXPECT_EQ(mat(10, 10), 0);
-  EXPECT_EQ(mat(25, 25), 200);
-  EXPECT_EQ(mat(32, 32), 200);
-  EXPECT_EQ(mat(41, 41), 0);
-  EXPECT_EQ(mat(42, 42), 200);
-  EXPECT_EQ(mat(47, 47), 0);
+  CheckMatrix(mat, Bcsstm01MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -193,6 +201,13 @@ TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, double>> Bcsstm02MatrixTestEntries() {
+  return { {{0, 1}, 0}, {{0, 0}, 0.09213858051}, {{3, 3}, 0.137995737983},
+           {{9, 9}, 0.09213858051}, {{12, 12}, 0.172828573455},
+           {{15, 15}, 0.0852383576022}, {{22, 22}, 0.172828573455},
+           {{25, 25}, 0.0617332189107}, {{65, 65}, 0.019746938665} };
 }
 
 TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
@@ -201,16 +216,7 @@ TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 1), 0);
-  EXPECT_EQ(mat(0, 0), 0.09213858051);
-  EXPECT_EQ(mat(3, 3), 0.137995737983);
-  EXPECT_EQ(mat(9, 9), 0.09213858051);
-  EXPECT_EQ(mat(12, 12), 0.172828573455);
-  EXPECT_EQ(mat(15, 15), 0.0852383576022);
-  EXPECT_EQ(mat(22, 22), 0.172828573455);
-  EXPECT_EQ(mat(25, 25), 0.0617332189107);
-  EXPECT_EQ(mat(65, 65), 0.019746938665);
-  EXPECT_EQ(mat(65, 65), 0.019746938665);
+  CheckMatrix(mat, Bcsstm02MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -220,26 +226,20 @@ TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
+vector<pair<Pos2d, double>> Can24MatrixTestEntries() {
+  return { {{1, 0}, 0}, {{0, 0}, 1}, {{6, 0}, 1}, {{10, 0}, 0},
+           {{100, 0}, 0}, {{17, 1}, 1}, {{22, 2}, 1}, {{22, 3}, 0},
+           {{23, 3}, 0}, {{3, 3}, 1}, {{18, 3}, 1}, {{22, 22}, 1},
+           {{23, 23}, 1}, {{24, 24}, 0} };
+}
+
 TEST(SparseMatrixTests, ReadCan24MtxFile) {
   auto file_path = TestDataFilePath("can_24.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(1, 0), 0);
-  EXPECT_EQ(mat(0, 0), 1);
-  EXPECT_EQ(mat(6, 0), 1);
-  EXPECT_EQ(mat(10, 0), 0);
-  EXPECT_EQ(mat(100, 0), 0);
-  EXPECT_EQ(mat(17, 1), 1);
-  EXPECT_EQ(mat(22, 2), 1);
-  EXPECT_EQ(mat(22, 3), 0);
-  EXPECT_EQ(mat(23, 3), 0);
-  EXPECT_EQ(mat(3, 3), 1);
-  EXPECT_EQ(mat(18, 3), 1);
-  EXPECT_EQ(mat(22, 22), 1);
-  EXPECT_EQ(mat(23, 23), 1);
-  EXPECT_EQ(mat(24, 24), 0);
+  CheckMatrix(mat, Can24MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -247,6 +247,19 @@ TEST(SparseMatrixTests, ReadCan24MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, complex<double>>> Dwg961aMatrixTestEntries() {
+  return { {{0, 1}, {0.0}}, {{0, 0}, {-49.1537, 4797.68}},
+           {{1, 0}, {-24.0559, 992.499}}, {{4, 1}, {-24.0559, 992.5}},
+           {{62, 3}, {-12.5474, 1902.7}}, {{8, 7}, {-24.0572, 992.373}},
+           {{12, 12}, {35891.2, 4797.69}}, {{48, 47}, {-36022.7, 0.0}},
+           {{94, 47}, {-36022.6, 0.0}}, {{95, 47}, {35986.0, 0.0}},
+           {{48, 48}, {35891.2, 4797.7}}, {{49, 48}, {-24.0559, 992.508}},
+           {{108, 63}, {-12.5475, 1902.7}}, {{69, 69}, {-25.1009, 3804.95}},
+           {{703, 703}, {-42.4361, 0.24016}},
+           {{704, 703}, {-9.34981, -0.234424}},
+           {{704, 704}, {-54.292, 0.0881584}}, {{705, 705}, {0.0}} };
 }
 
 TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
@@ -256,24 +269,7 @@ TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 1), std::complex(0.0));
-  EXPECT_EQ(mat(0, 0), std::complex(-49.1537, 4797.68));
-  EXPECT_EQ(mat(1, 0), std::complex(-24.0559, 992.499));
-  EXPECT_EQ(mat(4, 1), std::complex(-24.0559, 992.5));
-  EXPECT_EQ(mat(62, 3), std::complex(-12.5474, 1902.7));
-  EXPECT_EQ(mat(8, 7), std::complex(-24.0572, 992.373));
-  EXPECT_EQ(mat(12, 12), std::complex(35891.2, 4797.69));
-  EXPECT_EQ(mat(48, 47), std::complex(-36022.7, 0.0));
-  EXPECT_EQ(mat(94, 47), std::complex(-36022.6, 0.0));
-  EXPECT_EQ(mat(95, 47), std::complex(35986.0, 0.0));
-  EXPECT_EQ(mat(48, 48), std::complex(35891.2, 4797.7));
-  EXPECT_EQ(mat(49, 48), std::complex(-24.0559, 992.508));
-  EXPECT_EQ(mat(108, 63), std::complex(-12.5475, 1902.7));
-  EXPECT_EQ(mat(69, 69), std::complex(-25.1009, 3804.95));
-  EXPECT_EQ(mat(703, 703), std::complex(-42.4361, 0.24016));
-  EXPECT_EQ(mat(704, 703), std::complex(-9.34981, -0.234424));
-  EXPECT_EQ(mat(704, 704), std::complex(-54.292, 0.0881584));
-  EXPECT_EQ(mat(705, 705), std::complex(0.0));
+  CheckMatrix(mat, Dwg961aMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -283,25 +279,38 @@ TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
+vector<pair<Pos2d, double>> FarmMatrixTestEntries() {
+  return { {{3, 3}, 0}, {{0, 0}, 1}, {{1, 1}, 1}, {{1, 5}, 1}, {{2, 5}, 20},
+           {{3, 6}, 40}, {{0, 11}, 250}, {{0, 14}, 125}, {{3, 14}, 10},
+           {{2, 15}, 1}, {{3, 16}, 1}, {{4, 16}, 0} };
+}
+
 TEST(SparseMatrixTests, ReadFarmMtxFile) {
   auto file_path = TestDataFilePath("farm.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
-  using ValueContainer = std::vector<uint8_t>;
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  CheckMatrix(mat, FarmMatrixTestEntries());
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  // Change name of matrix to "farmd", as "farm" is used by "flex" test below.
+  prm_path = absl::StrReplaceAll(prm_path, {{"farm", "farmd"}});
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t> mat0;
+  EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat0);
+}
+
+TEST(SparseMatrixTests, ReadFarmMtxFileFlex) {
+  auto file_path = TestDataFilePath("farm.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using ValueContainer = pierank::FlexArray<uint8_t>;
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(3, 3), 0);
-  EXPECT_EQ(mat(0, 0), 1);
-  EXPECT_EQ(mat(1, 1), 1);
-  EXPECT_EQ(mat(1, 5), 1);
-  EXPECT_EQ(mat(2, 5), 20);
-  EXPECT_EQ(mat(3, 6), 40);
-  EXPECT_EQ(mat(0, 11), 250);
-  EXPECT_EQ(mat(0, 14), 125);
-  EXPECT_EQ(mat(3, 14), 10);
-  EXPECT_EQ(mat(2, 15), 1);
-  EXPECT_EQ(mat(3, 16), 1);
-  EXPECT_EQ(mat(4, 16), 0);
+  CheckMatrix(mat, FarmMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -309,6 +318,19 @@ TEST(SparseMatrixTests, ReadFarmMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, complex<float>>> Mhd1280bMatrixTestEntries() {
+  return { {{0, 1}, {0.0f}}, {{0, 0}, {2.0f, 0.0f}},
+           {{1, 1}, {0.252505826f, 0.0f}},
+           {{3, 1}, {0.000144380768f, -1.11464849e-18f}},
+           {{32, 1}, {0.101002561f, 0.0f}},
+           {{39, 5}, {1.76503909e-8f, 2.42039935e-23f}},
+           {{52, 27}, {4.84969212e-7f, 4.38176119e-10f}},
+           {{1275, 1273}, {-5.2735779e-9f, 1.52774623e-23f}},
+           {{1278, 1278}, {0.00153411731f, 0.0f}},
+           {{1279, 1278}, {-4.21835721e-6f, 0.0f}},
+           {{1279, 1279}, {1.49705588e-8f, 0.0f}}, {{1280, 1280}, {0.0f}} };
 }
 
 TEST(SparseMatrixTests, ReadMhd1280bMtxFile) {
@@ -318,19 +340,7 @@ TEST(SparseMatrixTests, ReadMhd1280bMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 1), std::complex(0.0f));
-  EXPECT_EQ(mat(0, 0), std::complex(2.0f, 0.0f));
-  EXPECT_EQ(mat(1, 1), std::complex(0.252505826f, 0.0f));
-  EXPECT_EQ(mat(3, 1), std::complex(0.000144380768f, -1.11464849e-18f));
-  EXPECT_EQ(mat(32, 1), std::complex(0.101002561f, 0.0f));
-  EXPECT_EQ(mat(39, 5), std::complex(1.76503909e-8f, 2.42039935e-23f));
-  EXPECT_EQ(mat(52, 27), std::complex(4.84969212e-7f, 4.38176119e-10f));
-  EXPECT_EQ(mat(1275, 1273), std::complex(-5.2735779e-9f, 1.52774623e-23f));
-  EXPECT_EQ(mat(1278, 1278), std::complex(0.00153411731f, 0.0f));
-  EXPECT_EQ(mat(1279, 1278), std::complex(-4.21835721e-6f, 0.0f));
-  EXPECT_EQ(mat(1279, 1279), std::complex(1.49705588e-8f, 0.0f));
-  EXPECT_EQ(mat(1280, 1280), std::complex(0.0f));
-
+  CheckMatrix(mat, Mhd1280bMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -338,6 +348,23 @@ TEST(SparseMatrixTests, ReadMhd1280bMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, float>> Plskz362MatrixTestEntries() {
+  return { {{0, 0}, 0}, {{130, 0}, 0.1789438674667032f},
+           {{246, 0}, 0.18205396002412488f},
+           {{130, 1}, -0.1789438674667032f},
+           {{268, 20}, 0.24528693972315807f},
+           {{279, 42}, -0.2881268089697375f},
+           {{195, 70}, 0.262563672245518f},
+           {{218, 97}, -0.3188461370613087f},
+           {{357, 125}, -0.28935985888075244f},
+           {{323, 202}, -0.01902841376331865f},
+           {{331, 218}, -0.020751353961338204f},
+           {{359, 243}, -0.0293547623841256f},
+           {{360, 244}, -0.02559133359087351f},
+           {{361, 244}, -0.023915340143661593f},
+           {{361, 245}, 0}, {{362, 244}, 0}, {{362, 245}, 0} };
 }
 
 TEST(SparseMatrixTests, ReadPlskz362MtxFile) {
@@ -347,24 +374,7 @@ TEST(SparseMatrixTests, ReadPlskz362MtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(0, 0), 0);
-  EXPECT_EQ(mat(130, 0), 0.1789438674667032f);
-  EXPECT_EQ(mat(246, 0), 0.18205396002412488f);
-  EXPECT_EQ(mat(130, 1), -0.1789438674667032f);
-  EXPECT_EQ(mat(268, 20), 0.24528693972315807f);
-  EXPECT_EQ(mat(279, 42), -0.2881268089697375f);
-  EXPECT_EQ(mat(195, 70), 0.262563672245518f);
-  EXPECT_EQ(mat(218, 97), -0.3188461370613087f);
-  EXPECT_EQ(mat(357, 125), -0.28935985888075244f);
-  EXPECT_EQ(mat(323, 202), -0.01902841376331865f);
-  EXPECT_EQ(mat(331, 218), -0.020751353961338204f);
-  EXPECT_EQ(mat(359, 243), -0.0293547623841256f);
-  EXPECT_EQ(mat(360, 244), -0.02559133359087351f);
-  EXPECT_EQ(mat(361, 244), -0.023915340143661593f);
-  EXPECT_EQ(mat(361, 245), 0);
-  EXPECT_EQ(mat(362, 244), 0);
-  EXPECT_EQ(mat(362, 245), 0);
-
+  CheckMatrix(mat, Plskz362MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -374,6 +384,18 @@ TEST(SparseMatrixTests, ReadPlskz362MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
+vector<pair<Pos2d, complex<double>>> Young2cMatrixTestEntries() {
+  return { {{841, 0}, {0.0}}, {{0, 841}, {0.0}}, {{2, 0}, {0.0}},
+           {{0, 0}, {-218.46, 0.0}}, {{1, 0}, {64.0, 0.0}},
+           {{29, 0}, {64.0, 0.0}}, {{35, 6}, {64.0, 0.0}},
+           {{7, 8}, {64.0, 0.0}}, {{8, 8}, {-218.46, 0.0}},
+           {{9, 9}, {-218.46, 0.0}}, {{47, 18}, {64.0, 0.0}},
+           {{24, 24}, {-218.46, 0.0}}, {{11, 40}, {64.0, 0.0}},
+           {{811, 840}, {64.0, 0.0}}, {{839, 840}, {64.0, 0.0}},
+           {{840, 840}, {-218.46, 0.0}}, {{840, 841}, {0.0}},
+           {{841, 840}, {0.0}}, {{841, 841}, {0.0}} };
+}
+
 TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
   auto file_path = TestDataFilePath("young2c.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
@@ -381,25 +403,7 @@ TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  EXPECT_EQ(mat(841, 0), std::complex(0.0));
-  EXPECT_EQ(mat(0, 841), std::complex(0.0));
-  EXPECT_EQ(mat(2, 0), std::complex(0.0));
-  EXPECT_EQ(mat(0, 0), std::complex(-218.46, 0.0));
-  EXPECT_EQ(mat(1, 0), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(29, 0), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(35, 6), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(7, 8), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(8, 8), std::complex(-218.46, 0.0));
-  EXPECT_EQ(mat(9, 9), std::complex(-218.46, 0.0));
-  EXPECT_EQ(mat(47, 18), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(24, 24), std::complex(-218.46, 0.0));
-  EXPECT_EQ(mat(11, 40), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(811, 840), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(839, 840), std::complex(64.0, 0.0));
-  EXPECT_EQ(mat(840, 840), std::complex(-218.46, 0.0));
-  EXPECT_EQ(mat(840, 841), std::complex(0.0));
-  EXPECT_EQ(mat(841, 840), std::complex(0.0));
-  EXPECT_EQ(mat(841, 841), std::complex(0.0));
+  CheckMatrix(mat, Young2cMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));

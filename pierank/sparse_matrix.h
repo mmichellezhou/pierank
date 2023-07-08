@@ -89,13 +89,13 @@ PieRankFileTypes(const std::string &prm_path) {
   if (!file_or.ok()) return file_or.status();
   auto file = *std::move(file_or);
   if (EatString(&file, kPieRankMatrixFileMagicNumbers)) {
-    MatrixType mtype;
-    auto status = mtype.Read(&file);
+    MatrixType matrix_type;
+    auto status = matrix_type.Read(&file);
     if (!status.ok()) return status;
-    DataType dtype;
-    status.Update(dtype.Read(&file));
+    DataType data_type;
+    status.Update(data_type.Read(&file));
     if (!status.ok()) return status;
-    return std::make_pair(mtype, dtype);
+    return std::make_pair(matrix_type, data_type);
   } else
     return absl::InternalError("Bad file format");
 }
@@ -159,6 +159,12 @@ public:
 
   SparseMatrix &operator=(SparseMatrix &&) = default;
 
+  inline static constexpr DataType StaticDataType() {
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+      return DataType::kFlex;
+    return DataType::FromValueType<ValueType>();
+  }
+
   ValueType operator()(PosType pos0, PosType pos1) const {
     PosType non_idx_pos;
     FlexPosIterator first, last;
@@ -175,7 +181,7 @@ public:
     }
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
-      if (!mtype_.IsPattern()) return At(it - pos_());
+      if (!type_.IsPattern()) return At(it - pos_());
       return 1;
     } else
       return 0;
@@ -204,9 +210,7 @@ public:
 
   PosType MaxDimSize() const { return std::max(rows_, cols_); }
 
-  const MatrixType &GetMatrixType() const { return mtype_; }
-
-  const DataType &GetDataType() const { return dtype_; }
+  const MatrixType &Type() const { return type_; }
 
   uint32_t IndexDim() const { return index_dim_; }
 
@@ -220,9 +224,7 @@ public:
     if (lhs.rows_ != rhs.rows_) return false;
     if (lhs.cols_ != rhs.cols_) return false;
     if (lhs.nnz_ != rhs.nnz_) return false;
-    if (lhs.mtype_ != rhs.mtype_) return false;
-    // No need to check for if (lhs.dtype_ != rhs.dtype_) return false;
-
+    if (lhs.type_ != rhs.type_) return false;
     if (lhs.index_dim_ != rhs.index_dim_) return false;
     if (lhs.index_ != rhs.index_) return false;
     if (lhs.pos_ != rhs.pos_) return false;
@@ -232,9 +234,9 @@ public:
 
   void WriteAllButPosAndData(std::ostream *os) const {
     *os << kPieRankMatrixFileMagicNumbers;
-    auto status = mtype_.Write(os);
+    auto status = type_.Write(os);
     if (!status.ok()) *os << status.message();
-    status = dtype_.Write(os);
+    status = StaticDataType().Write(os);
     if (!status.ok()) *os << status.message();
     ConvertAndWriteUint64(os, rows_);
     ConvertAndWriteUint64(os, cols_);
@@ -248,8 +250,16 @@ public:
     matrix.WriteAllButPosAndData(&os);
     os << matrix.pos_;
     WriteUint64(&os, matrix.data_.size());
-    WriteData<std::ostream, ValueType>(&os, matrix.data_.data(),
-                                       matrix.data_.size());
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+      auto status = matrix.data_.Write(&os);
+      if (!status.ok()) LOG(FATAL) << status.message();
+    } else {
+      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
+        LOG(WARNING) << "Unknown data container type";
+      WriteData<std::ostream, ValueType>(&os, matrix.data_.data(),
+                                         matrix.data_.size());
+    }
+
     return os;
   }
 
@@ -257,10 +267,12 @@ public:
   uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
     uint64_t offset = 0;
     if (EatString(&is, kPieRankMatrixFileMagicNumbers, &offset)) {
-      auto status = mtype_.Read(&is, &offset);
+      auto status = type_.Read(&is, &offset);
       if (!status.ok()) LOG(FATAL) << status.message();
-      status.Update(dtype_.Read(&is, &offset));
+      DataType data_type;
+      status.Update(data_type.Read(&is, &offset));
       if (!status.ok()) LOG(FATAL) << status.message();
+      CHECK_EQ(data_type, StaticDataType());
       rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
       cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
@@ -278,8 +290,15 @@ public:
     is >> matrix.index_;
     is >> matrix.pos_;
     auto size = ReadUint64(&is);
-    matrix.data_.resize(size);
-    ReadData(&is, matrix.data_.data(), size);
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+      auto status = matrix.data_.Read(&is);
+      if (!status.ok()) LOG(FATAL) << status.message();
+    } else {
+      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
+        LOG(WARNING) << "Unknown data container type";
+      matrix.data_.resize(size);
+      ReadData(&is, matrix.data_.data(), size);
+    }
     return is;
   }
 
@@ -313,7 +332,7 @@ public:
     status_.Update(pos_.Mmap(path, &offset));
     auto size = ReadUint64AtOffset(&file, &offset);
     if (size) {
-      CHECK(!mtype_.IsPattern()) << "Only non-pattern matrices have data";
+      CHECK(!type_.IsPattern()) << "Only non-pattern matrices have data";
       if (!file) {
         LOG(ERROR) << "Error reading matrix data size";
         return absl::InternalError(absl::StrCat("Error reading file: ", path));
@@ -324,7 +343,7 @@ public:
       if (!mmap.ok()) return mmap.status();
       data_mmap_ = *std::move(mmap);
     } else
-      CHECK(mtype_.IsPattern()) << "Only pattern matrices have no data";
+      CHECK(type_.IsPattern()) << "Only pattern matrices have no data";
     return status_;
   }
 
@@ -345,7 +364,7 @@ public:
       return status_;
     }
 
-    mtype_ = mat.Type();
+    type_ = mat.Type();
     rows_ = mat.Rows();
     cols_ = mat.Cols();
     index_dim_ = 1;  // Matrix Market file is column-major
@@ -544,7 +563,10 @@ public:
         pos.clear();
       }
       for (auto &data : datas) {
-        res.data_.insert(res.data_.end(), data.begin(), data.end());
+        if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+          res.data_.Append(data);
+        else
+          res.data_.insert(res.data_.end(), data.begin(), data.end());
         data.clear();
       }
     }
@@ -565,13 +587,13 @@ public:
     // std::cout << PosRangesDebugString(ranges);
 
     auto offsets = RangeNnzOffsets(ranges);
-    // <num_items, pos_item_size, pos_file, val_file> for each range
+    // <num_items, pos_item_size, pos_file, data_file> for each range
     std::vector<std::tuple<uint64_t, uint32_t, std::string, std::string>>
         tmp_file_infos;
     nnz.Reset();
     auto pos_min = std::numeric_limits<PosType>::max();
     auto pos_max = std::numeric_limits<PosType>::min();
-    bool has_data = !mtype_.IsPattern();
+    bool has_data = !type_.IsPattern();
     for (uint32_t r = 0; r < ranges.size(); ++r) {
       FlexPosType pos;
       DataContainerType data;
@@ -584,19 +606,24 @@ public:
         return absl::InternalError("Error write file: " + pos_file);
       fclose(fpos);
 
-      std::string val_file;
+      std::string data_file;
       if (has_data) {
         FILE *fval;
-        std::tie(fval, val_file) = OpenTmpFile(path);
+        std::tie(fval, data_file) = OpenTmpFile(path);
         CHECK(fval);
         ConvertAndWriteUint64(fval, data.size());
-        WriteData(fval, data.data(), data.size());
+        if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+          auto status = data.Write(fval);
+          if (!status.ok()) return status;
+        }
+        else if (!WriteData(fval, data.data(), data.size()))
+          return absl::InternalError("Error write file: " + data_file);
         fclose(fval);
       } else
         DCHECK(data.empty());
 
       tmp_file_infos.push_back(
-          std::make_tuple(pos.size(), pos.ItemSize(), pos_file, val_file));
+          std::make_tuple(pos.size(), pos.ItemSize(), pos_file, data_file));
     }
     DCHECK_GE(pos_min, 0);
     DCHECK_LT(pos_max, mat.index_dim_ ? mat.rows_ : mat.cols_);
@@ -616,14 +643,16 @@ public:
       return absl::InternalError("Error write file: " + path);
     uint64_t total_items = 0;
     for (const auto &tmp_file_info : tmp_file_infos) {
-      auto[num_items, pos_item_size, pos_file, val_file] = tmp_file_info;
+      auto[num_items, pos_item_size, pos_file, data_file] = tmp_file_info;
       auto pos_file_or = OpenReadFile(pos_file);
       if (!pos_file_or.ok()) return pos_file_or.status();
       FlexPosType pos(pos_item_size, num_items);
-      pos.ReadValues(&*pos_file_or, pos_item_size, pos_value_shift);
+      if (!pos.ReadValues(&*pos_file_or, pos_item_size, pos_value_shift))
+        return absl::InternalError("Error read file: " + pos_file);
       CHECK_EQ(pos.size(), num_items);
       total_items += num_items;
-      WriteData(&ofs, pos.Data(), pos_item_size * num_items);
+      if (!WriteData(&ofs, pos.Data(), pos_item_size * num_items))
+        return absl::InternalError("Error write file: " + path);
       std::remove(pos_file.c_str());
     }
     CHECK_EQ(total_items, nnz_);
@@ -635,17 +664,27 @@ public:
     if (has_data) {
       total_items = 0;
       for (const auto &tmp_file_info : tmp_file_infos) {
-        auto[num_items, pos_item_size, pos_file, val_file] = tmp_file_info;
-        auto val_file_or = OpenReadFile(val_file);
-        if (!val_file_or.ok()) return val_file_or.status();
-        auto size = ReadUint64(&*val_file_or);
+        auto[num_items, pos_item_size, pos_file, data_file] = tmp_file_info;
+        auto data_file_or = OpenReadFile(data_file);
+        if (!data_file_or.ok()) return data_file_or.status();
+        auto size = ReadUint64(&*data_file_or);
         CHECK_EQ(size, num_items);
         total_items += num_items;
         DataContainerType data;
         data.resize(size);
-        ReadData(&*val_file_or, data.data(), size);
-        WriteData(&ofs, data.data(), size);
-        std::remove(val_file.c_str());
+        if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+          auto status = data.Read(&*data_file_or);
+          if (!status.ok()) return status;
+          status.Update(data.Write(&ofs));
+          if (!status.ok()) return status;
+        }
+        else {
+          if (!ReadData(&*data_file_or, data.data(), size))
+            return absl::InternalError("Error read file: " + data_file);
+          if (!WriteData(&ofs, data.data(), size))
+            return absl::InternalError("Error write file: " + path);
+        }
+        std::remove(data_file.c_str());
       }
       CHECK_EQ(total_items, nnz_);
     }
@@ -663,8 +702,9 @@ public:
       absl::StrAppend(&res, tab, status_.ToString(), "\n");
       return res;
     }
-    absl::StrAppend(&res, tab, "mtype: \"", mtype_.ToString(), "\"\n");
-    absl::StrAppend(&res, tab, "dtype: \"", dtype_.ToString(), "\"\n");
+    absl::StrAppend(&res, tab, "matrix_type: \"", type_.ToString(), "\"\n");
+    absl::StrAppend(&res, tab, "data_type: \"", StaticDataType().ToString(),
+                    "\"\n");
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
@@ -675,11 +715,19 @@ public:
     absl::StrAppend(&res, tab, "}\n");
     absl::StrAppend(&res, tab, "pos {\n", pos_.DebugString(max_items, indent));
     absl::StrAppend(&res, tab, "}\n");
-    absl::StrAppend(&res, tab, "data: ",
-                    data_mmap_.empty()
-                    ? VectorToString(data_, max_items)
-                    : VectorToString<decltype(data_mmap_), ValueType>(
-                        data_mmap_, max_items));
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+      CHECK(data_mmap_.empty());
+      absl::StrAppend(&res, tab, "data {\n",
+                      data_.DebugString(max_items, indent), "}\n");
+    } else {
+      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
+        LOG(WARNING) << "Unknown data container type";
+      absl::StrAppend(&res, tab, "data: ",
+                      data_mmap_.empty()
+                      ? VectorToString(data_, max_items)
+                      : VectorToString<decltype(data_mmap_), ValueType>(
+                          data_mmap_, max_items));
+    }
     absl::StrAppend(&res, "\n");
 
     return res;
@@ -704,9 +752,14 @@ protected:
   absl::Status status_;
 
   ValueType At(IdxType idx) const {
-    return data_mmap_.empty()
-           ? reinterpret_cast<const ValueType *>(data_.data())[idx]
-           : reinterpret_cast<const ValueType *>(data_mmap_.data())[idx];
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+      DCHECK(data_mmap_.empty());
+      return data_[idx];
+    } else {
+      return data_mmap_.empty()
+             ? reinterpret_cast<const ValueType *>(data_.data())[idx]
+             : reinterpret_cast<const ValueType *>(data_mmap_.data())[idx];
+    }
   }
 
   virtual void InitRanges(const PosRanges &ranges, uint32_t range_id) {}
@@ -781,8 +834,7 @@ protected:
   SparseMatrix<PosType, IdxType, DataContainerType>
   CopyOnlyDimInfo(bool change_index_dim = false) const {
     SparseMatrix<PosType, IdxType, DataContainerType> res;
-    res.mtype_ = mtype_;
-    res.dtype_ = dtype_;
+    res.type_ = type_;
     res.rows_ = rows_;
     res.cols_ = cols_;
     res.nnz_ = nnz_;
@@ -848,7 +900,7 @@ protected:
     *pos = std::move(FlexPosType(pos_item_size, range_size));
 
     DCHECK(data->empty());
-    bool has_data = !mtype_.IsPattern();
+    bool has_data = !type_.IsPattern();
     data->resize(has_data ? range_size : 0);
 
     for (PosType p = 0; p < index_pos_end; ++p) {
@@ -857,7 +909,12 @@ protected:
         if (pos_i >= min_pos && pos_i < max_pos) {
           auto i_new = idx[pos_i] + (*nbr)[pos_i] - offset;
           pos->SetItem(i_new, p);
-          if (has_data) (*data)[i_new] = data_[i];
+          if (has_data) {
+            if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+              data->SetItem(i_new, data_[i]);
+            else
+              (*data)[i_new] = data_[i];
+          }
           nbr->IncItem(pos_i);
         }
       }
@@ -865,8 +922,7 @@ protected:
   }
 
 private:
-  MatrixType mtype_;
-  DataType dtype_ = DataType::FromValueType<ValueType>();
+  MatrixType type_;
   PosType rows_ = 0;
   PosType cols_ = 0;
   IdxType nnz_ = 0;
@@ -881,9 +937,13 @@ template<typename PosType, typename IdxType>
 class SparseMatrixVar {
 public:
   enum Enum : uint32_t {
+    kFlexInt64,
     kDouble,
     kComplexDouble
   };
+
+  using SparseMatrixFlexInt64 =
+      SparseMatrix<PosType, IdxType, FlexArray<int64_t>>;
 
   using SparseMatrixDouble =
       SparseMatrix<PosType, IdxType, std::vector<double>>;
@@ -901,14 +961,21 @@ public:
 
   SparseMatrixVar &operator=(SparseMatrixVar &&) = default;
 
+  SparseMatrixVar(SparseMatrixFlexInt64 &&other) {
+    type_ = kFlexInt64;
+    var_.template emplace<kFlexInt64>(
+        std::forward<SparseMatrixFlexInt64>(other));
+  }
+
   SparseMatrixVar(SparseMatrixDouble &&other) {
     type_ = kDouble;
-    var_.template emplace<0>(std::forward<SparseMatrixDouble>(other));
+    var_.template emplace<kDouble>(std::forward<SparseMatrixDouble>(other));
   }
 
   SparseMatrixVar(SparseMatrixComplexDouble &&other) {
     type_ = kComplexDouble;
-    var_.template emplace<1>(std::forward<SparseMatrixComplexDouble>(other));
+    var_.template emplace<kComplexDouble>(
+        std::forward<SparseMatrixComplexDouble>(other));
   }
 
   SparseMatrixVar(const std::string &prm_path, bool mmap = false) {
@@ -921,16 +988,20 @@ public:
   absl::Status status() const { return status_; }
 
   void SetType(Enum type) {
-    if (type == kDouble)
-      var_.template emplace<0>();
+    if (type == kFlexInt64)
+      var_.template emplace<kFlexInt64>();
+    else if (type == kDouble)
+      var_.template emplace<kDouble>();
     else
-      var_.template emplace<1>();
+      var_.template emplace<kComplexDouble>();
     type_ = type;
   }
 
-  void SetType(MatrixType type) {
-    if (!type.IsComplex())
-      SetType(kDouble);
+  void SetType(MatrixType type, bool flex = false) {
+    if (!type.IsComplex()) {
+      if (flex && type.IsInteger()) SetType(kFlexInt64);
+      else SetType(kDouble);
+    }
     else
       SetType(kComplexDouble);
   }
@@ -947,7 +1018,7 @@ public:
     auto types = PieRankFileTypes(prm_path);
     if (!types.ok()) return types.status();
     auto[matrix_type, data_type] = *std::move(types);
-    SetType(matrix_type);
+    SetType(matrix_type, data_type.IsFlex());
     return absl::OkStatus();
   }
 
@@ -958,7 +1029,10 @@ public:
     if (!status.ok()) return status;
 
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).ReadMatrixMarketFile(
+          mtx_path, bytes_per_pos, bytes_per_idx);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).ReadMatrixMarketFile(
           mtx_path, bytes_per_pos, bytes_per_idx);
     else
@@ -967,8 +1041,13 @@ public:
   }
 
   absl::Status ReadPieRankMatrixFile(const std::string &prm_path) {
+    auto status = SetTypeFromPieRankMatrixFile(prm_path);
+    if (!status.ok()) return status;
+
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).ReadPieRankMatrixFile(prm_path);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).ReadPieRankMatrixFile(prm_path);
     else
       return std::get<kComplexDouble>(var_).ReadPieRankMatrixFile(prm_path);
@@ -976,7 +1055,9 @@ public:
 
   absl::Status WritePieRankMatrixFile(const std::string &prm_path) const {
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).WritePieRankMatrixFile(prm_path);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).WritePieRankMatrixFile(prm_path);
     else
       return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(prm_path);
@@ -986,7 +1067,9 @@ public:
   ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
                  uint64_t max_nnz_per_thread = 8000000) const {
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).ChangeIndexDim(pool, max_nnz_per_thread);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).ChangeIndexDim(pool, max_nnz_per_thread);
     else
       return std::get<kComplexDouble>(var_).ChangeIndexDim(pool,
@@ -997,7 +1080,9 @@ public:
   ChangeIndexDim(const std::string &path,
                  uint64_t max_nnz_per_range = 64000000) const {
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).ChangeIndexDim(path, max_nnz_per_range);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).ChangeIndexDim(path, max_nnz_per_range);
     else
       return std::get<kComplexDouble>(var_).ChangeIndexDim(path,
@@ -1009,7 +1094,9 @@ public:
     if (!status.ok()) return status;
 
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).MmapPieRankMatrixFile(prm_path);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).MmapPieRankMatrixFile(prm_path);
     else
       return std::get<kComplexDouble>(var_).MmapPieRankMatrixFile(prm_path);
@@ -1017,7 +1104,9 @@ public:
 
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
     auto idx = var_.index();
-    if (idx == kDouble)
+    if (idx == kFlexInt64)
+      return std::get<kFlexInt64>(var_).DebugString(max_items, indent);
+    else if (idx == kDouble)
       return std::get<kDouble>(var_).DebugString(max_items, indent);
     else
       return std::get<kComplexDouble>(var_).DebugString(max_items, indent);
@@ -1027,8 +1116,9 @@ protected:
   absl::Status status_;
 
 private:
-  Enum type_ = kDouble;
+  Enum type_ = kFlexInt64;
   std::variant<
+      SparseMatrix<PosType, IdxType, FlexArray<int64_t>>,
       SparseMatrix<PosType, IdxType, std::vector<double>>,
       SparseMatrix<PosType, IdxType, std::vector<std::complex<double>>>> var_;
 };
