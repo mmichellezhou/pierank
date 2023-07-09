@@ -997,7 +997,7 @@ public:
     type_ = type;
   }
 
-  void SetType(MatrixType type, bool flex = false) {
+  void SetType(MatrixType type, bool flex = true) {
     if (!type.IsComplex()) {
       if (flex && type.IsInteger()) SetType(kFlexInt64);
       else SetType(kDouble);

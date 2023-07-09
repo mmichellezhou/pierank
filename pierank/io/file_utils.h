@@ -139,9 +139,8 @@ inline bool ConvertAndWriteInteger(FILE *fp, SrcType src_val) {
   DCHECK_LE(static_cast<double>(src_val), std::numeric_limits<DestType>::max());
   DCHECK_GE(static_cast<double>(src_val), std::numeric_limits<DestType>::min());
   DestType dest_val = static_cast<DestType>(src_val);
-  return fwrite(reinterpret_cast<const char *>(&dest_val),
-                sizeof(dest_val), 1, fp)
-         == sizeof(dest_val);
+  return 1 == fwrite(reinterpret_cast<const char *>(&dest_val),
+                     sizeof(dest_val), 1, fp);
 }
 
 template<typename SrcType>

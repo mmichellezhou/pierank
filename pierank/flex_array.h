@@ -464,10 +464,8 @@ public:
     CHECK(shift_by_min_val_ == shift_by_min_value || shift_by_min_value);
     if (!ConvertAndWriteUint64(os, min_val_)) return false;
     if (!ConvertAndWriteUint64(os, max_val_)) return false;
-
     if (!WriteUint32(os, sketch_bits)) return false;
     if (!WriteSketch(os, sketch_bits)) return false;
-
     return true;
   }
 
@@ -550,7 +548,7 @@ public:
 
   template<typename OutputStreamType>
   absl::Status Write(OutputStreamType *os) const {
-   auto [sketch_bits, item_size, shift_by_min_val] = FindBestEncoding();
+    auto [sketch_bits, item_size, shift_by_min_val] = FindBestEncoding();
     if (!WriteAllButValues(os, item_size, shift_by_min_val, sketch_bits))
       return absl::InternalError("Error writing all but values");
     if (!WriteValues(os, item_size, shift_by_min_val, sketch_bits))
