@@ -26,12 +26,14 @@ for mtx_file in "${MTX_FILES[@]}"; do
     echo -n "${mtx_file},${mtx_size},"
     # Get name of the matrix without the .mtx suffix
     mtx="${mtx_file%.*}"
-    "${MTX_TO_PRM}" --mtx_file="${mtx_file}" --output_row_major > "${LOG}"
+    "${MTX_TO_PRM}" --mtx_file="${mtx_file}" --output_row_major > "${LOG}" \
+      2> /dev/null
     mtx_read_time_ms=$(awk '/^mtx_read_time_ms: / {print $2}' "${LOG}")
     i0_write_time_ms=$(awk '/^index_and_prm_write_time_ms: / {print $2}' \
       "${LOG}")
     i0_prm_size=$(wc -c "${mtx}.i0.prm" | awk '{print $1}')
-    "${MTX_TO_PRM}" --mtx_file="${mtx_file}" --nooutput_row_major > "${LOG}"
+    "${MTX_TO_PRM}" --mtx_file="${mtx_file}" --nooutput_row_major > "${LOG}" \
+      2> /dev/null
     i1_write_time_ms=$(awk '/^prm_write_time_ms: / {print $2}' "${LOG}")
     i1_prm_size=$(wc -c "${mtx}.i1.prm" | awk '{print $1}')
     echo -n "${mtx_read_time_ms},${i0_write_time_ms},"
