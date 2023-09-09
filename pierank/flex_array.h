@@ -395,12 +395,12 @@ public:
   // Returns (-1, 0) if index values are not monotonically increasing.
   std::pair<uint64_t, uint32_t>  // <encode_size, new_item_size>
   EncodeSizeWithSketch(uint32_t sketch_bits) const {
-    if (num_items_ == 0) return std::make_pair(0, 0);
+    if (num_items_ == 0 || sketch_bits == 0) return std::make_pair(0, 0);
 
     uint64_t items_per_sketch = 1ULL << sketch_bits;
     T max_diff = 0;
     for (uint64_t i = 0; i < num_items_; i += items_per_sketch) {
-      uint64_t sketch_end = std::min(i + items_per_sketch, num_items_ - 1);
+      uint64_t sketch_end = std::min(i + items_per_sketch - 1, num_items_ - 1);
       if ((*this)[sketch_end] < (*this)[i])
         return std::make_pair(std::numeric_limits<uint64_t>::max(), 0);
       T diff = (*this)[sketch_end] - (*this)[i];
