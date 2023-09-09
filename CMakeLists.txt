@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.2)
 
 project(pierank)
 
+OPTION(PIERANK_CONST_MEMCPY "Use constant-size memcpy" OFF)
+IF(PIERANK_CONST_MEMCPY)
+  MESSAGE("Use constant-size memcpy as needed")
+  ADD_COMPILE_DEFINITIONS(PIERANK_USE_CONST_MEMCPY)
+ENDIF(PIERANK_CONST_MEMCPY)
+
 # External dependencies
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 

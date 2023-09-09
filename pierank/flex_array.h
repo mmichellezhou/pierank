@@ -23,7 +23,10 @@
 
 namespace pierank {
 
-#define PRK_MEMCPY(dest, src, size)                                   \
+#ifndef PIERANK_USE_CONST_MEMCPY
+#define PIERANK_CONST_MEMCPY(dest, src, size) memcpy(dest, src, size)
+#else
+#define PIERANK_CONST_MEMCPY(dest, src, size)                         \
   do {                                                                \
     if (size == 1)                                                    \
       memcpy(dest, src, 1);                                           \
@@ -44,6 +47,7 @@ namespace pierank {
       memcpy(dest, src, 8);                                           \
     }                                                                 \
   } while(0)
+#endif  // PIERANK_CONST_MEMCPY
 
 template<typename T>
 class FlexArray {
@@ -232,7 +236,7 @@ public:
     if (item_size_ == sizeof(T))
       *(reinterpret_cast<T *>(&vals_[old_size])) = val;
     else
-      PRK_MEMCPY(&vals_[old_size], &val, item_size_);
+      PIERANK_CONST_MEMCPY(&vals_[old_size], &val, item_size_);
 
     ++num_items_;
   }
@@ -267,7 +271,7 @@ public:
     auto *ptr = Data();
     ptr += idx * item_size_;
     T res = 0;
-    PRK_MEMCPY(&res, ptr, item_size_);
+    PIERANK_CONST_MEMCPY(&res, ptr, item_size_);
 
     if (sketch_bits_) {
       DCHECK_LT(idx >> sketch_bits_, sketch_.size());
@@ -296,7 +300,7 @@ public:
       reinterpret_cast<T *>(vals_.data())[idx] = value;
     else {
       auto *ptr = vals_.data() + idx * item_size_;
-      PRK_MEMCPY(ptr, &value, item_size_);
+      PIERANK_CONST_MEMCPY(ptr, &value, item_size_);
     }
     min_val_ = std::min(min_val_, value);
     max_val_ = std::max(max_val_, value);
@@ -314,9 +318,9 @@ public:
     else {
       DCHECK_LT(item_size_, sizeof(T));
       auto ptr = vals_.data() + idx * item_size_;
-      PRK_MEMCPY(&res, ptr, item_size_);
+      PIERANK_CONST_MEMCPY(&res, ptr, item_size_);
       res += delta;
-      PRK_MEMCPY(ptr, &res, item_size_);
+      PIERANK_CONST_MEMCPY(ptr, &res, item_size_);
     }
     max_val_ = std::max(max_val_, res);
     return res;
