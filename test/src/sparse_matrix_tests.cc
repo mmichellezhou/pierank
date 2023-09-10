@@ -24,6 +24,16 @@ void CheckMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
   }
 }
 
+template<typename M, typename V>
+void
+CheckMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
+  for (auto && [pos2d, values] : entries) {
+    auto && [row, col] = pos2d;
+    for (size_t i = 0; i < values.size(); ++i)
+      EXPECT_EQ(mat(row, col, i), values[i]);
+  }
+}
+
 void CheckAsh219Common(const SparseMatrix<uint32_t, uint64_t> &mat) {
   EXPECT_EQ(mat.Rows(), 219);
   EXPECT_EQ(mat.Cols(), 85);
@@ -409,6 +419,31 @@ TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
   }
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat0;
+  EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat0);
+}
+
+vector<pair<Pos2d, vector<double>>> Real2dTestMatrixTestEntries() {
+  return { {{0, 0}, {0, 0}},
+           {{2, 0}, {3.11, 3.12}}, {{4, 0}, {5.11, 5.12}},
+           {{0, 1}, {1.21, 1.22}}, {{2, 1}, {3.21, 3.22}},
+           {{0, 2}, {1.31, 1.32}}, {{3, 2}, {4.31, 4.32}},
+           {{1, 3}, {2.41, 2.42}}, {{2, 3}, {3.41, 3.42}},
+           {{2, 4}, {3.51, 3.52}}};
+}
+
+TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
+  auto file_path = TestDataFilePath("real_2d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  CheckMatrix(mat, Real2dTestMatrixTestEntries());
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
 }

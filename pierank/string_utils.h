@@ -82,6 +82,12 @@ VectorToString(const SrcType &src, std::size_t max_items = 0) {
   return res;
 }
 
+inline void RemoveWhiteSpaces(std::string &str) {
+  str.erase(std::remove_if(str.begin(), str.end(),
+                           [](char x) { return std::isspace(x); }),
+            str.end());
+}
+
 }  // namespace pierank
 
 #endif //PIERANK_STRING_UTILS_H_

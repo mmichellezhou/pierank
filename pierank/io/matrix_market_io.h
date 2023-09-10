@@ -195,7 +195,7 @@ public:
   using Var =
       std::variant<std::monostate, int64_t, double, std::complex<double>>;
 
-  using Entry = std::tuple<uint32_t, uint32_t, Var>;
+  using Entry = std::tuple<uint32_t, uint32_t, std::vector<Var>>;
 
   inline static bool HasMtxFileExtension(absl::string_view path) {
     return absl::EndsWith(path, ".mtx");
@@ -209,6 +209,12 @@ public:
       return !std::get<std::complex<double>>(var).real() &&
              !std::get<std::complex<double>>(var).imag();
     CHECK(false);
+  }
+
+  inline static bool AreVarsZero(const std::vector<Var> &vars) {
+    DCHECK(!vars.empty());
+    return std::all_of(vars.begin(), vars.end(),
+                       [](Var var) { return IsVarZero(var); });
   }
 
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
@@ -235,14 +241,14 @@ public:
 
   MatrixType ReadBanner() {
     std::vector<std::string> words = {"%%MatrixMarket", "matrix"};
-    MatrixType res = MatrixType::kUnknown;
     for (const auto &word : words) {
       std::string str;
       is_ >> str;
-      if (str != word) return res;
+      if (str != word) return MatrixType::kUnknown;
     }
     std::string mtype, dtype, subtype;
     is_ >> mtype >> dtype >> subtype;
+    MatrixType res = MatrixType::kUnknown;
     if (mtype == "array") {
       if (dtype == "complex") {
         if (subtype == "general") res = MatrixType::kArrayComplexGeneral;
@@ -272,7 +278,17 @@ public:
           res = MatrixType::kCoordinateRealSymmetric;
       }
     }
-    is_.ignore();  // skip the new line character
+    std::string line;
+    std::getline(is_, line);
+    RemoveWhiteSpaces(line);
+    data_dims_ = 1;
+    if (line.find("[") != std::string::npos) {
+      if (std::sscanf(line.c_str(), "[%u]", &data_dims_) != 1)
+        return MatrixType::kUnknown;
+    }
+    // Pattern matrix's data dims should always be 1
+    if (dtype == "pattern" && data_dims_ != 1)
+      return MatrixType::kUnknown;
     return res;
   }
 
@@ -281,22 +297,25 @@ public:
   Entry Next() {
     uint32_t first, second;
     is_ >> first >> second;
-    Var var;
-    if (type_.IsInteger()) {
-      int64_t value;
-      is_ >> value;
-      var = value;
-    } else if (type_.IsReal()) {
-      double value;
-      is_ >> value;
-      var = value;
-    } else if (type_.IsComplex()) {
-      double re, im;
-      is_ >> re >> im;
-      var = std::complex<double>(re, im);
+    std::vector<Var> vars;
+    uint32_t data_dims = data_dims_;
+    while (data_dims--) {
+      if (type_.IsInteger()) {
+        int64_t value;
+        is_ >> value;
+        vars.emplace_back(value);
+      } else if (type_.IsReal()) {
+        double value;
+        is_ >> value;
+        vars.emplace_back(value);
+      } else if (type_.IsComplex()) {
+        double re, im;
+        is_ >> re >> im;
+        vars.emplace_back(std::complex<double>(re, im));
+      }
     }
     count_++;
-    return std::make_tuple(first, second, var);
+    return std::make_tuple(first, second, vars);
   }
 
   uint32_t Rows() const { return rows_; }
@@ -309,22 +328,27 @@ public:
 
   const MatrixType &Type() const { return type_; }
 
+  uint32_t DataDims() const { return data_dims_; }
+
 private:
+  MatrixType type_ = MatrixType::kUnknown;
+  uint32_t data_dims_ = 1;  // dimensions for a single non-zero value
   uint32_t rows_;
   uint32_t cols_;
   uint64_t nnz_;
   std::ifstream is_;
-  MatrixType type_ = MatrixType::kUnknown;
   uint64_t count_ = 0;
 };
 
-// Tuple: <MatrixType, #rows, #cols, #nnz>
-inline absl::StatusOr<std::tuple<MatrixType, uint64_t, uint64_t, uint64_t>>
+// Tuple: <MatrixType, #data_dims, #rows, #cols, #nnz>
+inline
+absl::StatusOr<std::tuple<MatrixType, uint32_t, uint64_t, uint64_t, uint64_t>>
 MatrixMarketFileInfo(const std::string &mtx_path) {
-  std::tuple<MatrixType, uint64_t, uint64_t, uint64_t> res;
+  std::tuple<MatrixType, uint64_t, uint64_t, uint64_t, uint32_t> res;
   MatrixMarketIo mat(mtx_path);
   if (!mat.ok()) return absl::InternalError("Bad matrix market file");
-  return std::make_tuple(mat.Type(), mat.Rows(), mat.Cols(), mat.NumNonZeros());
+  return std::make_tuple(mat.Type(), mat.DataDims(), mat.Rows(), mat.Cols(),
+                         mat.NumNonZeros());
 }
 
 inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
@@ -333,7 +357,7 @@ inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
     LOG(ERROR) << info.status().message();
     return MatrixType::kUnknown;
   }
-  auto [type, rows, cols, nnz] = *std::move(info);
+  auto [type, data_dims, rows, cols, nnz] = *std::move(info);
   return type;
 }
 

@@ -165,7 +165,7 @@ public:
     return DataType::FromValueType<ValueType>();
   }
 
-  ValueType operator()(PosType pos0, PosType pos1) const {
+  ValueType operator()(PosType pos0, PosType pos1, uint32_t data_dim = 0) const {
     PosType non_idx_pos;
     FlexPosIterator first, last;
     if (index_dim_ == 0) {
@@ -181,13 +181,11 @@ public:
     }
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
-      if (!type_.IsPattern()) return At(it - pos_());
+      if (!type_.IsPattern()) return At(it - pos_(), data_dim);
       return 1;
     } else
       return 0;
   }
-
-  ValueType At(PosType pos0, PosType pos1) const { return (*this)(pos0, pos1); }
 
   const FlexIdxType &Index() const { return index_; }
 
@@ -221,10 +219,11 @@ public:
   friend bool
   operator==(const SparseMatrix<PosType, IdxType, DataContainerType> &lhs,
              const SparseMatrix<PosType, IdxType, DataContainerType> &rhs) {
+    if (lhs.type_ != rhs.type_) return false;
+    if (lhs.data_dims_ != rhs.data_dims_) return false;
     if (lhs.rows_ != rhs.rows_) return false;
     if (lhs.cols_ != rhs.cols_) return false;
     if (lhs.nnz_ != rhs.nnz_) return false;
-    if (lhs.type_ != rhs.type_) return false;
     if (lhs.index_dim_ != rhs.index_dim_) return false;
     if (lhs.index_ != rhs.index_) return false;
     if (lhs.pos_ != rhs.pos_) return false;
@@ -238,6 +237,7 @@ public:
     if (!status.ok()) *os << status.message();
     status = StaticDataType().Write(os);
     if (!status.ok()) *os << status.message();
+    WriteUint32(os, data_dims_);
     ConvertAndWriteUint64(os, rows_);
     ConvertAndWriteUint64(os, cols_);
     ConvertAndWriteUint64(os, nnz_);
@@ -273,6 +273,7 @@ public:
       status.Update(data_type.Read(&is, &offset));
       if (!status.ok()) LOG(FATAL) << status.message();
       CHECK_EQ(data_type, StaticDataType());
+      data_dims_ = ReadUint32(&is, &offset);
       rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
       cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
@@ -358,13 +359,15 @@ public:
                                     uint32_t bytes_per_idx = sizeof(IdxType)) {
     DCHECK_LE(bytes_per_pos, sizeof(PosType));
     DCHECK_LE(bytes_per_idx, sizeof(IdxType));
+    DCHECK(data_mmap_.empty());
     MatrixMarketIo mat(path);
     if (!mat.ok()) {
       status_ = absl::InternalError(absl::StrCat("Fail to open file: ", path));
       return status_;
     }
-
     type_ = mat.Type();
+    data_dims_ = mat.DataDims();
+    DCHECK_GT(data_dims_, 0);
     rows_ = mat.Rows();
     cols_ = mat.Cols();
     index_dim_ = 1;  // Matrix Market file is column-major
@@ -374,12 +377,13 @@ public:
     bool is_complex_matrix = mat.Type().IsComplex();
     std::size_t num_zero_vars = 0;
     while (mat.HasNext()) {
-      auto [first, second, var] = mat.Next();
+      auto [first, second, vars] = mat.Next();
+      DCHECK(mat.Type().IsPattern() || vars.size() == data_dims_);
       DCHECK_GT(first, 0);
       DCHECK_GT(second, 0);
       --first;
       --second;
-      if (MatrixMarketIo::IsVarZero(var)) {
+      if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) {
         ++num_zero_vars;
         continue;
       }
@@ -390,33 +394,35 @@ public:
         DCHECK_EQ(index_[prev_col], nnz_);
       }
       pos_.push_back(first);
-      if (is_integer_matrix) {
-        if constexpr (std::is_integral_v<ValueType>) {
-          DCHECK_LE(std::get<int64_t>(var),
-                    std::numeric_limits<ValueType>::max());
-          DCHECK_GE(std::get<int64_t>(var),
-                    std::numeric_limits<ValueType>::lowest());
+      for (const auto & var : vars) {
+        if (is_integer_matrix) {
+          if constexpr (std::is_integral_v<ValueType>) {
+            DCHECK_LE(std::get<int64_t>(var),
+                      std::numeric_limits<ValueType>::max());
+            DCHECK_GE(std::get<int64_t>(var),
+                      std::numeric_limits<ValueType>::lowest());
+          }
+          data_.push_back(std::get<int64_t>(var));
+        } else if (is_real_matrix) {
+          if constexpr (std::is_floating_point_v<ValueType>) {
+            DCHECK_LE(std::get<double>(var),
+                      std::numeric_limits<ValueType>::max());
+            DCHECK_GE(std::get<double>(var),
+                      std::numeric_limits<ValueType>::lowest());
+          }
+          data_.push_back(std::get<double>(var));
+        } else if (is_complex_matrix) {
+          if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
+            for (const auto &var : vars)
+              data_.push_back(std::get<std::complex<double>>(var));
+          } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
+            for (const auto &var : vars) {
+              data_.emplace_back(std::get<std::complex<double>>(var).real(),
+                                 std::get<std::complex<double>>(var).imag());
+            }
+          } else
+            CHECK(false) << "Complex matrix must have floating point data type";
         }
-        DCHECK(data_mmap_.empty());
-        data_.push_back(std::get<int64_t>(var));
-      } else if (is_real_matrix) {
-        if constexpr (std::is_floating_point_v<ValueType>) {
-          DCHECK_LE(std::get<double>(var),
-                    std::numeric_limits<ValueType>::max());
-          DCHECK_GE(std::get<double>(var),
-                    std::numeric_limits<ValueType>::lowest());
-        }
-        DCHECK(data_mmap_.empty());
-        data_.push_back(std::get<double>(var));
-      } else if (is_complex_matrix) {
-        DCHECK(data_mmap_.empty());
-        if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
-          data_.push_back(std::get<std::complex<double>>(var));
-        } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
-          data_.emplace_back(std::get<std::complex<double>>(var).real(),
-                              std::get<std::complex<double>>(var).imag());
-        } else
-          CHECK(false) << "Complex matrix must have floating point data type";
       }
       nnz_++;
     }
@@ -705,6 +711,7 @@ public:
     absl::StrAppend(&res, tab, "matrix_type: \"", type_.ToString(), "\"\n");
     absl::StrAppend(&res, tab, "data_type: \"", StaticDataType().ToString(),
                     "\"\n");
+    absl::StrAppend(&res, tab, "data_dims: ", data_dims_, "\n");
     absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
     absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
@@ -751,7 +758,8 @@ public:
 protected:
   absl::Status status_;
 
-  ValueType At(IdxType idx) const {
+  ValueType At(IdxType idx, uint32_t data_dim = 0) const {
+    idx = idx * data_dims_ + data_dim;
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
       DCHECK(data_mmap_.empty());
       return data_[idx];
@@ -835,6 +843,7 @@ protected:
   CopyOnlyDimInfo(bool change_index_dim = false) const {
     SparseMatrix<PosType, IdxType, DataContainerType> res;
     res.type_ = type_;
+    res.data_dims_ = data_dims_;
     res.rows_ = rows_;
     res.cols_ = cols_;
     res.nnz_ = nnz_;
@@ -923,6 +932,7 @@ protected:
 
 private:
   MatrixType type_;
+  uint32_t data_dims_ = 1;
   PosType rows_ = 0;
   PosType cols_ = 0;
   IdxType nnz_ = 0;
