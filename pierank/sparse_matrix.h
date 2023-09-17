@@ -41,9 +41,13 @@ inline constexpr absl::string_view kMatrixMarketFileExtension = ".mtx";
 inline std::string MatrixMarketToPieRankMatrixPath(
     absl::string_view mtx_path, bool change_index_dim = false,
     absl::string_view prm_dir = "") {
+  auto row_major = MatrixMarketFileIsRowMajor(std::string(mtx_path));
+  if (!row_major.ok()) return "";
+  if (*row_major) change_index_dim = !change_index_dim;
+  absl::string_view index_extension = change_index_dim ? ".i0" : ".i1";
+
   if (!absl::ConsumeSuffix(&mtx_path, kMatrixMarketFileExtension))
     return "";
-  std::string_view index_extension = change_index_dim ? ".i0" : ".i1";
   if (prm_dir.empty())
     return absl::StrCat(mtx_path, index_extension, kPieRankMatrixFileExtension);
   return absl::StrCat(prm_dir, kPathSeparator, FileNameInPath(mtx_path),
@@ -370,30 +374,32 @@ public:
     DCHECK_GT(data_dims_, 0);
     rows_ = mat.Rows();
     cols_ = mat.Cols();
-    index_dim_ = 1;  // Matrix Market file is column-major
-    PosType prev_col = static_cast<PosType>(-1);
+    index_dim_ = mat.RowMajor() ? 0 : 1;
+    PosType prev_index_pos = static_cast<PosType>(-1);
+    PosType index_pos;
     bool is_integer_matrix = mat.Type().IsInteger();
     bool is_real_matrix = mat.Type().IsReal();
     bool is_complex_matrix = mat.Type().IsComplex();
     std::size_t num_zero_vars = 0;
     while (mat.HasNext()) {
-      auto [first, second, vars] = mat.Next();
+      auto [row, col, vars] = mat.Next();
       DCHECK(mat.Type().IsPattern() || vars.size() == data_dims_);
-      DCHECK_GT(first, 0);
-      DCHECK_GT(second, 0);
-      --first;
-      --second;
+      DCHECK_GT(row, 0);
+      DCHECK_GT(col, 0);
+      --row;
+      --col;
+      index_pos = index_dim_ == 0 ? row : col;
       if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) {
         ++num_zero_vars;
         continue;
       }
-      while (prev_col != second) {
+      while (prev_index_pos != index_pos) {
         index_.push_back(nnz_);
-        ++prev_col;
-        DCHECK_LE(prev_col, second);
-        DCHECK_EQ(index_[prev_col], nnz_);
+        ++prev_index_pos;
+        DCHECK_LE(prev_index_pos, index_pos);
+        DCHECK_EQ(index_[prev_index_pos], nnz_);
       }
-      pos_.push_back(first);
+      pos_.push_back(index_dim_ ? row : col);
       for (const auto & var : vars) {
         if (is_integer_matrix) {
           if constexpr (std::is_integral_v<ValueType>) {

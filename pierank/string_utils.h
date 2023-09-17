@@ -6,6 +6,7 @@
 #define PIERANK_STRING_UTILS_H_
 
 #include <complex>
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -86,6 +87,26 @@ inline void RemoveWhiteSpaces(std::string &str) {
   str.erase(std::remove_if(str.begin(), str.end(),
                            [](char x) { return std::isspace(x); }),
             str.end());
+}
+
+inline std::map<std::string, std::string>
+StringToDict(const std::string &str,
+             const std::string &key_delim = ",",
+             const std::string &value_delim = ":") {
+  std::map<std::string, std::string> res;
+  std::string::size_type start_pos = 0;
+  while (start_pos < str.size()) {
+    std::string::size_type key_delim_pos = str.find(key_delim, start_pos);
+    std::string kv_pair = str.substr(start_pos, key_delim_pos - start_pos);
+    std::string::size_type value_delim_pos = kv_pair.find(value_delim);
+    if (value_delim_pos == std::string::npos)
+      return {{"_error_", "No value found in '" + kv_pair + "'"}};
+    res[kv_pair.substr(0, value_delim_pos)] =
+        kv_pair.substr(value_delim_pos + 1);
+    if (key_delim_pos == std::string::npos) break;
+    start_pos = key_delim_pos + 1;
+  }
+  return res;
 }
 
 }  // namespace pierank

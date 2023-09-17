@@ -282,9 +282,22 @@ public:
     std::getline(is_, line);
     RemoveWhiteSpaces(line);
     data_dims_ = 1;
-    if (line.find("[") != std::string::npos) {
-      if (std::sscanf(line.c_str(), "[%u]", &data_dims_) != 1)
+    row_major_ = false;
+    if (line[0] == '[' && line.back() == ']') {
+      const auto&& dict = StringToDict(line.substr(1, line.size() - 2));
+      auto it = dict.find("_error_");
+      if (it != dict.end()) {        ;
+        LOG(ERROR) << "Error parsing '" << line << "': " << it->second;
         return MatrixType::kUnknown;
+      }
+      for (const auto& [key, value] : dict) {
+        if (key == "dims") data_dims_ = std::stoi(value);
+        else if (key == "order") {
+          if (value == "row") row_major_ = true;
+          else if (value == "col" || value == "column") row_major_ = false;
+          else return MatrixType::kUnknown;
+        }
+      }
     }
     // Pattern matrix's data dims should always be 1
     if (dtype == "pattern" && data_dims_ != 1)
@@ -330,9 +343,12 @@ public:
 
   uint32_t DataDims() const { return data_dims_; }
 
+  bool RowMajor() const { return row_major_; }
+
 private:
   MatrixType type_ = MatrixType::kUnknown;
   uint32_t data_dims_ = 1;  // dimensions for a single non-zero value
+  bool row_major_ = false;
   uint32_t rows_;
   uint32_t cols_;
   uint64_t nnz_;
@@ -340,15 +356,15 @@ private:
   uint64_t count_ = 0;
 };
 
-// Tuple: <MatrixType, #data_dims, #rows, #cols, #nnz>
+// Tuple: <MatrixType, #data_dims, bool, #rows, #cols, #nnz>
 inline
-absl::StatusOr<std::tuple<MatrixType, uint32_t, uint64_t, uint64_t, uint64_t>>
+absl::StatusOr<std::tuple<MatrixType, uint32_t, bool, uint64_t, uint64_t, uint64_t>>
 MatrixMarketFileInfo(const std::string &mtx_path) {
-  std::tuple<MatrixType, uint64_t, uint64_t, uint64_t, uint32_t> res;
+  std::tuple<MatrixType, uint32_t, bool, uint64_t, uint64_t, uint64_t> res;
   MatrixMarketIo mat(mtx_path);
   if (!mat.ok()) return absl::InternalError("Bad matrix market file");
-  return std::make_tuple(mat.Type(), mat.DataDims(), mat.Rows(), mat.Cols(),
-                         mat.NumNonZeros());
+  return std::make_tuple(mat.Type(), mat.DataDims(), mat.RowMajor(),
+                         mat.Rows(), mat.Cols(), mat.NumNonZeros());
 }
 
 inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
@@ -357,8 +373,19 @@ inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
     LOG(ERROR) << info.status().message();
     return MatrixType::kUnknown;
   }
-  auto [type, data_dims, rows, cols, nnz] = *std::move(info);
+  auto [type, data_dims, row_major, rows, cols, nnz] = *std::move(info);
   return type;
+}
+
+inline absl::StatusOr<bool>
+MatrixMarketFileIsRowMajor(const std::string &mtx_path) {
+  auto info = MatrixMarketFileInfo(mtx_path);
+  if (!info.ok()) {
+    LOG(ERROR) << info.status().message();
+    return info.status();
+  }
+  auto [type, data_dims, row_major, rows, cols, nnz] = *std::move(info);
+  return row_major;
 }
 
 }  // namespace pierank
