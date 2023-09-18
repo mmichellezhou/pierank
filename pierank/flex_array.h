@@ -58,6 +58,8 @@ public:
     using value_type        = T;
     using pointer           = const FlexArray<T> *;  // not the ordinary T*
     using reference         = void;  // not the ordinary T&
+    using const_reference   = void;  // not the ordinary T&
+    using size_type         = std::size_t;
 
     Iterator() = default;
 

@@ -16,6 +16,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 
+#include "pierank/string_utils.h"
+
 namespace pierank {
 
 class MatrixType {

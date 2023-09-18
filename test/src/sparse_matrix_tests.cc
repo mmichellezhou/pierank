@@ -2,6 +2,8 @@
 // Created by Michelle Zhou on 2/26/22.
 //
 
+#include <set>
+
 #include "absl/strings/str_replace.h"
 #include "gtest/gtest.h"
 #include "pierank/pierank.h"
@@ -17,7 +19,7 @@ static bool kGeneratePieRankMatrixFile = false;
 using Pos2d = pair<uint32_t, uint32_t>;
 
 template<typename M, typename V>
-void CheckMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
+void CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
   for (auto && [pos2d, value] : entries) {
     auto && [row, col] = pos2d;
     EXPECT_EQ(mat(row, col), value);
@@ -26,11 +28,35 @@ void CheckMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
 
 template<typename M, typename V>
 void
-CheckMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
+CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
+  uint32_t data_dims = mat.DataDims();
   for (auto && [pos2d, values] : entries) {
+    EXPECT_EQ(values.size(), data_dims);
     auto && [row, col] = pos2d;
-    for (size_t i = 0; i < values.size(); ++i)
-      EXPECT_EQ(mat(row, col, i), values[i]);
+    for (size_t d = 0; d < values.size(); ++d)
+      EXPECT_EQ(mat(row, col, d), values[d]);
+  }
+}
+
+template<typename M, typename V>
+void
+CheckDenseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
+  set<Pos2d> checked;
+  uint32_t data_dims = mat.DataDims();
+  for (auto && [pos2d, values] : entries) {
+    EXPECT_EQ(values.size(), data_dims);
+    auto && [row, col] = pos2d;
+    checked.insert({row, col});
+    for (size_t d = 0; d < values.size(); ++d)
+      EXPECT_EQ(mat(row, col, d), values[d]);
+  }
+
+  for (int i = 0; i < mat.Rows(); ++i) {
+    for (int j = 0; j < mat.Cols(); ++j) {
+      if (checked.find({i, j}) != checked.end()) continue;
+      for (size_t d = 0; d < data_dims; ++d)
+        EXPECT_EQ(mat(i, j, d), 0);
+    }
   }
 }
 
@@ -182,7 +208,7 @@ TEST(SparseMatrixTests, ReadB1ssMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, B1ssMatrixTestEntries());
+  CheckSparseMatrix(mat, B1ssMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -203,7 +229,7 @@ TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Bcsstm01MatrixTestEntries());
+  CheckSparseMatrix(mat, Bcsstm01MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -226,7 +252,7 @@ TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Bcsstm02MatrixTestEntries());
+  CheckSparseMatrix(mat, Bcsstm02MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -249,7 +275,7 @@ TEST(SparseMatrixTests, ReadCan24MtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Can24MatrixTestEntries());
+  CheckSparseMatrix(mat, Can24MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -279,7 +305,7 @@ TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Dwg961aMatrixTestEntries());
+  CheckSparseMatrix(mat, Dwg961aMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -301,7 +327,7 @@ TEST(SparseMatrixTests, ReadFarmMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, FarmMatrixTestEntries());
+  CheckSparseMatrix(mat, FarmMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   // Change name of matrix to "farmd", as "farm" is used by "flex" test below.
   prm_path = absl::StrReplaceAll(prm_path, {{"farm", "farmd"}});
@@ -320,7 +346,7 @@ TEST(SparseMatrixTests, ReadFarmMtxFileFlex) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, FarmMatrixTestEntries());
+  CheckSparseMatrix(mat, FarmMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -350,7 +376,7 @@ TEST(SparseMatrixTests, ReadMhd1280bMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Mhd1280bMatrixTestEntries());
+  CheckSparseMatrix(mat, Mhd1280bMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -384,7 +410,7 @@ TEST(SparseMatrixTests, ReadPlskz362MtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Plskz362MatrixTestEntries());
+  CheckSparseMatrix(mat, Plskz362MatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -413,7 +439,7 @@ TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
   SparseMatrix<uint32_t, uint64_t, ValueContainer> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Young2cMatrixTestEntries());
+  CheckSparseMatrix(mat, Young2cMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -438,7 +464,7 @@ TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckMatrix(mat, Real2dTestMatrixTestEntries());
+  CheckSparseMatrix(mat, Real2dTestMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -446,4 +472,17 @@ TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat0;
   EXPECT_OK(mat0.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat0);
+}
+
+TEST(SparseMatrixTests, ToDenseReal2dTestMtxFile) {
+  auto file_path = TestDataFilePath("real_2d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseMatrix<uint32_t, uint64_t> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+
+  auto dense = mat.ToDense(/*split_data_dims=*/false);
+  CheckDenseMatrix(dense, Real2dTestMatrixTestEntries());
+
+  dense = mat.ToDense(/*split_data_dims=*/true);
+  CheckDenseMatrix(dense, Real2dTestMatrixTestEntries());
 }

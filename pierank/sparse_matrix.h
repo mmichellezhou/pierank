@@ -24,6 +24,7 @@
 #include "pierank/data_type.h"
 #include "pierank/flex_array.h"
 #include "pierank/math_utils.h"
+#include "pierank/matrix.h"
 #include "pierank/string_utils.h"
 #include "pierank/thread_pool.h"
 #include "pierank/io/file_utils.h"
@@ -121,7 +122,7 @@ PieRankFileTypes(const std::string &prm_path) {
    */
 template<typename PosType, typename IdxType,
     typename DataContainerType = std::vector<double>>
-class SparseMatrix {
+class SparseMatrix : public Matrix<PosType, IdxType, DataContainerType> {
 public:
   // <min_pos, max_pos, nnz>
   using PosRange = std::tuple<PosType, PosType, IdxType>;
@@ -141,6 +142,8 @@ public:
 
   using ValueType = typename DataContainerType::value_type;
 
+  using DenseType = Matrix<PosType, IdxType, DataContainerType>;
+
   using UniquePtr =
       std::unique_ptr<SparseMatrix<PosType, IdxType, DataContainerType>>;
 
@@ -150,7 +153,7 @@ public:
   SparseMatrix() = default;
 
   SparseMatrix(const std::string &prm_file_path, bool mmap = false) {
-    status_ = mmap
+    this->status_ = mmap
               ? this->MmapPieRankMatrixFile(prm_file_path)
               : this->ReadPieRankMatrixFile(prm_file_path);
   }
@@ -169,23 +172,46 @@ public:
     return DataType::FromValueType<ValueType>();
   }
 
-  ValueType operator()(PosType pos0, PosType pos1, uint32_t data_dim = 0) const {
+  DenseType ToDense(bool split_data_dims = false) const {
+    DenseType res(this->type_, this->data_dims_, split_data_dims,
+                  this->rows_, this->cols_, this->index_dim_);
+    res.InitData();
+    PosType items_per_index_pos = this->index_dim_ ? this->rows_ : this->cols_;
+    if (!split_data_dims) items_per_index_pos *= this->data_dims_;
+    uint32_t items_per_pos = split_data_dims ? 1 : this->data_dims_;
+    IdxType data_idx = 0;
+    const bool has_data = !this->type_.IsPattern();
+    const IdxType data_dim_stride = res.DataDimStride();
+    for (PosType p = 0; p < index_.size() - 1; ++p) {
+      for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
+        IdxType idx0 = p * items_per_index_pos + this->Pos(i) * items_per_pos;
+        for (uint32_t j = 0; j < this->data_dims_; ++j) {
+          IdxType idx = idx0 + j * data_dim_stride;
+          res.Set(idx, has_data ? this->data_[data_idx++] : 1);
+        }
+      }
+    }
+    DCHECK(!has_data || data_idx == nnz_ * this->data_dims_);
+    return res;
+  }
+
+  ValueType operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
     PosType non_idx_pos;
     FlexPosIterator first, last;
-    if (index_dim_ == 0) {
-      if (pos0 + 1 >= index_.size()) return 0;
-      first = pos_(index_[pos0]);
-      last = pos_(index_[pos0 + 1]);
-      non_idx_pos = pos1;
+    if (this->index_dim_ == 0) {
+      if (row + 1 >= index_.size()) return 0;
+      first = pos_(index_[row]);
+      last = pos_(index_[row + 1]);
+      non_idx_pos = col;
     } else {
-      if (pos1 + 1 >= index_.size()) return 0;
-      first = pos_(index_[pos1]);
-      last = pos_(index_[pos1 + 1]);
-      non_idx_pos = pos0;
+      if (col + 1 >= index_.size()) return 0;
+      first = pos_(index_[col]);
+      last = pos_(index_[col + 1]);
+      non_idx_pos = row;
     }
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
-      if (!type_.IsPattern()) return At(it - pos_(), data_dim);
+      if (!this->type_.IsPattern()) return At(it - pos_(), data_dim);
       return 1;
     } else
       return 0;
@@ -206,20 +232,6 @@ public:
 
   IdxType NumNonZeros() const { return nnz_; }
 
-  PosType Rows() const { return rows_; }
-
-  PosType Cols() const { return cols_; }
-
-  PosType MaxDimSize() const { return std::max(rows_, cols_); }
-
-  const MatrixType &Type() const { return type_; }
-
-  uint32_t IndexDim() const { return index_dim_; }
-
-  bool ok() const { return status_.ok(); }
-
-  absl::Status status() const { return status_; }
-
   friend bool
   operator==(const SparseMatrix<PosType, IdxType, DataContainerType> &lhs,
              const SparseMatrix<PosType, IdxType, DataContainerType> &rhs) {
@@ -237,15 +249,15 @@ public:
 
   void WriteAllButPosAndData(std::ostream *os) const {
     *os << kPieRankMatrixFileMagicNumbers;
-    auto status = type_.Write(os);
+    auto status = this->type_.Write(os);
     if (!status.ok()) *os << status.message();
     status = StaticDataType().Write(os);
     if (!status.ok()) *os << status.message();
-    WriteUint32(os, data_dims_);
-    ConvertAndWriteUint64(os, rows_);
-    ConvertAndWriteUint64(os, cols_);
+    WriteUint32(os, this->data_dims_);
+    ConvertAndWriteUint64(os, this->rows_);
+    ConvertAndWriteUint64(os, this->cols_);
     ConvertAndWriteUint64(os, nnz_);
-    WriteUint32(os, index_dim_);
+    WriteUint32(os, this->index_dim_);
     *os << index_;
   }
 
@@ -271,22 +283,22 @@ public:
   uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
     uint64_t offset = 0;
     if (EatString(&is, kPieRankMatrixFileMagicNumbers, &offset)) {
-      auto status = type_.Read(&is, &offset);
+      auto status = this->type_.Read(&is, &offset);
       if (!status.ok()) LOG(FATAL) << status.message();
       DataType data_type;
       status.Update(data_type.Read(&is, &offset));
       if (!status.ok()) LOG(FATAL) << status.message();
       CHECK_EQ(data_type, StaticDataType());
-      data_dims_ = ReadUint32(&is, &offset);
-      rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
-      cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
+      this->data_dims_ = ReadUint32(&is, &offset);
+      this->rows_ = ReadUint64AndConvert<PosType>(&is, &offset);
+      this->cols_ = ReadUint64AndConvert<PosType>(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
-      index_dim_ = ReadUint32(&is, &offset);
-      CHECK_LT(index_dim_, 2);
+      this->index_dim_ = ReadUint32(&is, &offset);
+      CHECK_LT(this->index_dim_, 2);
       if (!is)
-        status_.Update(absl::InternalError("Error read PRM file header"));
+        this->status_.Update(absl::InternalError("Error read PRM file header"));
     } else
-      status_.Update(absl::InternalError("Bad file format"));
+      this->status_.Update(absl::InternalError("Bad file format"));
     return offset;
   }
 
@@ -333,11 +345,11 @@ public:
     if (!file_or.ok()) return file_or.status();
     auto file = *std::move(file_or);
     uint64_t offset = ReadPieRankMatrixFileHeader(file);
-    status_.Update(index_.Mmap(path, &offset));
-    status_.Update(pos_.Mmap(path, &offset));
+    this->status_.Update(index_.Mmap(path, &offset));
+    this->status_.Update(pos_.Mmap(path, &offset));
     auto size = ReadUint64AtOffset(&file, &offset);
     if (size) {
-      CHECK(!type_.IsPattern()) << "Only non-pattern matrices have data";
+      CHECK(!this->type_.IsPattern()) << "Only non-pattern matrices have data";
       if (!file) {
         LOG(ERROR) << "Error reading matrix data size";
         return absl::InternalError(absl::StrCat("Error reading file: ", path));
@@ -346,16 +358,16 @@ public:
       auto mmap = MmapReadOnlyFile(path, offset, size);
       offset += size;
       if (!mmap.ok()) return mmap.status();
-      data_mmap_ = *std::move(mmap);
+      this->data_mmap_ = *std::move(mmap);
     } else
-      CHECK(type_.IsPattern()) << "Only pattern matrices have no data";
-    return status_;
+      CHECK(this->type_.IsPattern()) << "Only pattern matrices have no data";
+    return this->status_;
   }
 
   void UnMmap() {
     index_.UnMmap();
     pos_.UnMmap();
-    if (data_mmap_.size()) data_mmap_.unmap();
+    if (this->data_mmap_.size()) this->data_mmap_.unmap();
   }
 
   absl::Status ReadMatrixMarketFile(const std::string &path,
@@ -363,18 +375,19 @@ public:
                                     uint32_t bytes_per_idx = sizeof(IdxType)) {
     DCHECK_LE(bytes_per_pos, sizeof(PosType));
     DCHECK_LE(bytes_per_idx, sizeof(IdxType));
-    DCHECK(data_mmap_.empty());
+    DCHECK(this->data_mmap_.empty());
     MatrixMarketIo mat(path);
     if (!mat.ok()) {
-      status_ = absl::InternalError(absl::StrCat("Fail to open file: ", path));
-      return status_;
+      this->status_ =
+          absl::InternalError(absl::StrCat("Fail to open file: ", path));
+      return this->status_;
     }
-    type_ = mat.Type();
-    data_dims_ = mat.DataDims();
-    DCHECK_GT(data_dims_, 0);
-    rows_ = mat.Rows();
-    cols_ = mat.Cols();
-    index_dim_ = mat.RowMajor() ? 0 : 1;
+    this->type_ = mat.Type();
+    this->data_dims_ = mat.DataDims();
+    DCHECK_GT(this->data_dims_, 0);
+    this->rows_ = mat.Rows();
+    this->cols_ = mat.Cols();
+    this->index_dim_ = mat.RowMajor() ? 0 : 1;
     PosType prev_index_pos = static_cast<PosType>(-1);
     PosType index_pos;
     bool is_integer_matrix = mat.Type().IsInteger();
@@ -383,12 +396,12 @@ public:
     std::size_t num_zero_vars = 0;
     while (mat.HasNext()) {
       auto [row, col, vars] = mat.Next();
-      DCHECK(mat.Type().IsPattern() || vars.size() == data_dims_);
+      DCHECK(mat.Type().IsPattern() || vars.size() == this->data_dims_);
       DCHECK_GT(row, 0);
       DCHECK_GT(col, 0);
       --row;
       --col;
-      index_pos = index_dim_ == 0 ? row : col;
+      index_pos = this->index_dim_ == 0 ? row : col;
       if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) {
         ++num_zero_vars;
         continue;
@@ -399,7 +412,7 @@ public:
         DCHECK_LE(prev_index_pos, index_pos);
         DCHECK_EQ(index_[prev_index_pos], nnz_);
       }
-      pos_.push_back(index_dim_ ? row : col);
+      pos_.push_back(this->index_dim_ ? row : col);
       for (const auto & var : vars) {
         if (is_integer_matrix) {
           if constexpr (std::is_integral_v<ValueType>) {
@@ -408,7 +421,7 @@ public:
             DCHECK_GE(std::get<int64_t>(var),
                       std::numeric_limits<ValueType>::lowest());
           }
-          data_.push_back(std::get<int64_t>(var));
+          this->data_.push_back(std::get<int64_t>(var));
         } else if (is_real_matrix) {
           if constexpr (std::is_floating_point_v<ValueType>) {
             DCHECK_LE(std::get<double>(var),
@@ -416,15 +429,16 @@ public:
             DCHECK_GE(std::get<double>(var),
                       std::numeric_limits<ValueType>::lowest());
           }
-          data_.push_back(std::get<double>(var));
+          this->data_.push_back(std::get<double>(var));
         } else if (is_complex_matrix) {
           if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
             for (const auto &var : vars)
-              data_.push_back(std::get<std::complex<double>>(var));
+              this->data_.push_back(std::get<std::complex<double>>(var));
           } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
             for (const auto &var : vars) {
-              data_.emplace_back(std::get<std::complex<double>>(var).real(),
-                                 std::get<std::complex<double>>(var).imag());
+              this->data_.emplace_back(
+                  std::get<std::complex<double>>(var).real(),
+                  std::get<std::complex<double>>(var).imag());
             }
           } else
             CHECK(false) << "Complex matrix must have floating point data type";
@@ -605,7 +619,7 @@ public:
     nnz.Reset();
     auto pos_min = std::numeric_limits<PosType>::max();
     auto pos_max = std::numeric_limits<PosType>::min();
-    bool has_data = !type_.IsPattern();
+    bool has_data = !this->type_.IsPattern();
     for (uint32_t r = 0; r < ranges.size(); ++r) {
       FlexPosType pos;
       DataContainerType data;
@@ -710,18 +724,19 @@ public:
   std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
     std::string res;
     std::string tab(indent, ' ');
-    if (!status_.ok()) {
-      absl::StrAppend(&res, tab, status_.ToString(), "\n");
+    if (!this->status_.ok()) {
+      absl::StrAppend(&res, tab, this->status_.ToString(), "\n");
       return res;
     }
-    absl::StrAppend(&res, tab, "matrix_type: \"", type_.ToString(), "\"\n");
+    absl::StrAppend(&res, tab, "matrix_type: \"", this->type_.ToString(),
+                    "\"\n");
     absl::StrAppend(&res, tab, "data_type: \"", StaticDataType().ToString(),
                     "\"\n");
-    absl::StrAppend(&res, tab, "data_dims: ", data_dims_, "\n");
-    absl::StrAppend(&res, tab, "rows: ", rows_, "\n");
-    absl::StrAppend(&res, tab, "cols: ", cols_, "\n");
+    absl::StrAppend(&res, tab, "data_dims: ", this->data_dims_, "\n");
+    absl::StrAppend(&res, tab, "rows: ", this->rows_, "\n");
+    absl::StrAppend(&res, tab, "cols: ", this->cols_, "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
-    absl::StrAppend(&res, tab, "index_dim: ", index_dim_, "\n");
+    absl::StrAppend(&res, tab, "index_dim: ", this->index_dim_, "\n");
     indent += 2;
     absl::StrAppend(&res, tab, "index {\n",
                     index_.DebugString(max_items, indent));
@@ -729,17 +744,17 @@ public:
     absl::StrAppend(&res, tab, "pos {\n", pos_.DebugString(max_items, indent));
     absl::StrAppend(&res, tab, "}\n");
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
-      CHECK(data_mmap_.empty());
+      CHECK(this->data_mmap_.empty());
       absl::StrAppend(&res, tab, "data {\n",
-                      data_.DebugString(max_items, indent), "}\n");
+                      this->data_.DebugString(max_items, indent), "}\n");
     } else {
       if constexpr (!is_specialization_v<DataContainerType, std::vector>)
         LOG(WARNING) << "Unknown data container type";
       absl::StrAppend(&res, tab, "data: ",
-                      data_mmap_.empty()
-                      ? VectorToString(data_, max_items)
-                      : VectorToString<decltype(data_mmap_), ValueType>(
-                          data_mmap_, max_items));
+                      this->data_mmap_.empty()
+                      ? VectorToString(this->data_, max_items)
+                      : VectorToString<decltype(this->data_mmap_), ValueType>(
+                          this->data_mmap_, max_items));
     }
     absl::StrAppend(&res, "\n");
 
@@ -762,17 +777,15 @@ public:
   }
 
 protected:
-  absl::Status status_;
-
   ValueType At(IdxType idx, uint32_t data_dim = 0) const {
-    idx = idx * data_dims_ + data_dim;
+    idx = idx * this->data_dims_ + data_dim;
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
-      DCHECK(data_mmap_.empty());
-      return data_[idx];
+      DCHECK(this->data_mmap_.empty());
+      return this->data_[idx];
     } else {
-      return data_mmap_.empty()
-             ? reinterpret_cast<const ValueType *>(data_.data())[idx]
-             : reinterpret_cast<const ValueType *>(data_mmap_.data())[idx];
+      return this->data_mmap_.empty()
+             ? reinterpret_cast<const ValueType *>(this->data_.data())[idx]
+             : reinterpret_cast<const ValueType *>(this->data_mmap_.data())[idx];
     }
   }
 
@@ -820,7 +833,7 @@ protected:
     if (!this->status_.ok()) return false;
     max_ranges = std::min(max_ranges, pool ? pool->Size() : 1);
     const auto pos_balanced_ranges =
-        this->SplitPosIntoRanges(MaxDimSize(), max_ranges);
+        this->SplitPosIntoRanges(this->MaxDimSize(), max_ranges);
     const auto nnz_balanced_ranges = this->SplitIndexDimByNnz(max_ranges);
 
     auto[init, update, sync] = RangeFuncs();
@@ -848,20 +861,20 @@ protected:
   SparseMatrix<PosType, IdxType, DataContainerType>
   CopyOnlyDimInfo(bool change_index_dim = false) const {
     SparseMatrix<PosType, IdxType, DataContainerType> res;
-    res.type_ = type_;
-    res.data_dims_ = data_dims_;
-    res.rows_ = rows_;
-    res.cols_ = cols_;
+    res.type_ = this->type_;
+    res.data_dims_ = this->data_dims_;
+    res.rows_ = this->rows_;
+    res.cols_ = this->cols_;
     res.nnz_ = nnz_;
     if (change_index_dim)
-      res.index_dim_ = index_dim_ ? 0 : 1;
+      res.index_dim_ = this->index_dim_ ? 0 : 1;
     else
-      res.index_dim_ = index_dim_;
+      res.index_dim_ = this->index_dim_;
     return res;
   }
 
   FlexPosType CountNonIndexDimNnz() const {
-    PosType non_index_dim_size = index_dim_ ? Rows() : Cols();
+    PosType non_index_dim_size = this->index_dim_ ? this->Rows() : this->Cols();
     FlexPosType pos(pos_.ItemSize(), non_index_dim_size);
     auto index_pos_end = this->IndexPosEnd();
     for (PosType p = 0; p < index_pos_end; ++p) {
@@ -876,7 +889,7 @@ protected:
     CHECK(!idx_shift_by_min_val) << "Not yet supported";
     FlexIdxType idx(idx_item_size);
     IdxType nnz = 0;
-    PosType new_index_dim_size = index_dim_ ? Rows() : Cols();
+    PosType new_index_dim_size = this->index_dim_ ? this->Rows() : this->Cols();
     for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
       idx.push_back(nnz);
       nnz += nbr[p];
@@ -915,7 +928,7 @@ protected:
     *pos = std::move(FlexPosType(pos_item_size, range_size));
 
     DCHECK(data->empty());
-    bool has_data = !type_.IsPattern();
+    bool has_data = !this->type_.IsPattern();
     data->resize(has_data ? range_size : 0);
 
     for (PosType p = 0; p < index_pos_end; ++p) {
@@ -926,9 +939,9 @@ protected:
           pos->SetItem(i_new, p);
           if (has_data) {
             if constexpr (is_specialization_v<DataContainerType, FlexArray>)
-              data->SetItem(i_new, data_[i]);
+              data->SetItem(i_new, this->data_[i]);
             else
-              (*data)[i_new] = data_[i];
+              (*data)[i_new] = this->data_[i];
           }
           nbr->IncItem(pos_i);
         }
@@ -937,16 +950,9 @@ protected:
   }
 
 private:
-  MatrixType type_;
-  uint32_t data_dims_ = 1;
-  PosType rows_ = 0;
-  PosType cols_ = 0;
   IdxType nnz_ = 0;
-  uint32_t index_dim_ = 0;
   FlexIdxType index_;
   FlexPosType pos_;
-  DataContainerType data_;
-  mio::mmap_source data_mmap_;
 };
 
 template<typename PosType, typename IdxType>
