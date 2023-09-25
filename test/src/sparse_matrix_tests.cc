@@ -485,4 +485,7 @@ TEST(SparseMatrixTests, ToDenseReal2dTestMtxFile) {
 
   dense = mat.ToDense(/*split_data_dims=*/true);
   CheckDenseMatrix(dense, Real2dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t> mat0(dense);
+  EXPECT_EQ(mat, mat0);
 }

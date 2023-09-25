@@ -144,6 +144,10 @@ public:
 
   using DenseType = Matrix<PosType, IdxType, DataContainerType>;
 
+  using Entry = MatrixMarketIo::Entry;
+
+  using DataFamily = MatrixType::DataFamily;
+
   using UniquePtr =
       std::unique_ptr<SparseMatrix<PosType, IdxType, DataContainerType>>;
 
@@ -156,6 +160,30 @@ public:
     this->status_ = mmap
               ? this->MmapPieRankMatrixFile(prm_file_path)
               : this->ReadPieRankMatrixFile(prm_file_path);
+  }
+
+  SparseMatrix(const DenseType &dense) :
+      Matrix<PosType, IdxType, DataContainerType>(dense.Type(),
+                                                  dense.DataDims(),
+                                                  dense.SplitDataDims(),
+                                                  dense.Rows(), dense.Cols(),
+                                                  dense.IndexDim()) {
+    const uint32_t data_dims = dense.DataDims();
+    for (IdxType i = 0; i < dense.Elems(); ++i) {
+      auto && [row, col] = dense.IdxToPos(i);
+      bool all_zeros = true;
+      for (uint32_t d = 0; d < data_dims && all_zeros; ++d) {
+        if (dense(row, col, d) != 0) all_zeros = false;
+      }
+      if (!all_zeros) {
+        std::vector<MatrixMarketIo::Var> vars;
+        for (uint32_t d = 0; d < data_dims; ++d)
+          vars.push_back(dense(row, col, d));
+        push_back({row, col, vars});
+      }
+    }
+    ++index_pos_end_;
+    index_.push_back(nnz_);
   }
 
   SparseMatrix(const SparseMatrix &) = delete;
@@ -370,11 +398,57 @@ public:
     if (this->data_mmap_.size()) this->data_mmap_.unmap();
   }
 
-  absl::Status ReadMatrixMarketFile(const std::string &path,
-                                    uint32_t bytes_per_pos = sizeof(PosType),
-                                    uint32_t bytes_per_idx = sizeof(IdxType)) {
-    DCHECK_LE(bytes_per_pos, sizeof(PosType));
-    DCHECK_LE(bytes_per_idx, sizeof(IdxType));
+  void push_back(const Entry &entry) {
+    const auto & [row, col, vars] = entry;
+    auto family = this->Type().Family();
+    DCHECK(family == MatrixType::kBoolFamily ||
+           vars.size() == this->data_dims_);
+    DCHECK_GE(row, 0);
+    DCHECK_GE(col, 0);
+    PosType index_pos = this->index_dim_ == 0 ? row : col;
+    if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) return;
+    while (index_pos_end_ != index_pos) {
+      index_.push_back(nnz_);
+      ++index_pos_end_;
+      DCHECK_LE(index_pos_end_, index_pos);
+      DCHECK_EQ(index_[index_pos_end_], nnz_);
+    }
+    pos_.push_back(this->index_dim_ ? row : col);
+    for (const auto & var : vars) {
+      if (family == MatrixType::kIntegerFamily) {
+        if constexpr (std::is_integral_v<ValueType>) {
+          DCHECK_LE(std::get<int64_t>(var),
+                    std::numeric_limits<ValueType>::max());
+          DCHECK_GE(std::get<int64_t>(var),
+                    std::numeric_limits<ValueType>::lowest());
+        }
+        this->data_.push_back(std::get<int64_t>(var));
+      } else if (family == MatrixType::kRealFamily) {
+        if constexpr (std::is_floating_point_v<ValueType>) {
+          DCHECK_LE(std::get<double>(var),
+                    std::numeric_limits<ValueType>::max());
+          DCHECK_GE(std::get<double>(var),
+                    std::numeric_limits<ValueType>::lowest());
+        }
+        this->data_.push_back(std::get<double>(var));
+      } else if (family == MatrixType::kComplexFamily) {
+        if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
+          for (const auto &var : vars)
+            this->data_.push_back(std::get<std::complex<double>>(var));
+        } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
+          for (const auto &var : vars) {
+            this->data_.emplace_back(
+                std::get<std::complex<double>>(var).real(),
+                std::get<std::complex<double>>(var).imag());
+          }
+        } else
+          CHECK(false) << "Complex matrix must have floating point data type";
+      }
+    }
+    nnz_++;
+  }
+
+  absl::Status ReadMatrixMarketFile(const std::string &path) {
     DCHECK(this->data_mmap_.empty());
     MatrixMarketIo mat(path);
     if (!mat.ok()) {
@@ -388,67 +462,9 @@ public:
     this->rows_ = mat.Rows();
     this->cols_ = mat.Cols();
     this->index_dim_ = mat.RowMajor() ? 0 : 1;
-    PosType prev_index_pos = static_cast<PosType>(-1);
-    PosType index_pos;
-    bool is_integer_matrix = mat.Type().IsInteger();
-    bool is_real_matrix = mat.Type().IsReal();
-    bool is_complex_matrix = mat.Type().IsComplex();
-    std::size_t num_zero_vars = 0;
-    while (mat.HasNext()) {
-      auto [row, col, vars] = mat.Next();
-      DCHECK(mat.Type().IsPattern() || vars.size() == this->data_dims_);
-      DCHECK_GT(row, 0);
-      DCHECK_GT(col, 0);
-      --row;
-      --col;
-      index_pos = this->index_dim_ == 0 ? row : col;
-      if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) {
-        ++num_zero_vars;
-        continue;
-      }
-      while (prev_index_pos != index_pos) {
-        index_.push_back(nnz_);
-        ++prev_index_pos;
-        DCHECK_LE(prev_index_pos, index_pos);
-        DCHECK_EQ(index_[prev_index_pos], nnz_);
-      }
-      pos_.push_back(this->index_dim_ ? row : col);
-      for (const auto & var : vars) {
-        if (is_integer_matrix) {
-          if constexpr (std::is_integral_v<ValueType>) {
-            DCHECK_LE(std::get<int64_t>(var),
-                      std::numeric_limits<ValueType>::max());
-            DCHECK_GE(std::get<int64_t>(var),
-                      std::numeric_limits<ValueType>::lowest());
-          }
-          this->data_.push_back(std::get<int64_t>(var));
-        } else if (is_real_matrix) {
-          if constexpr (std::is_floating_point_v<ValueType>) {
-            DCHECK_LE(std::get<double>(var),
-                      std::numeric_limits<ValueType>::max());
-            DCHECK_GE(std::get<double>(var),
-                      std::numeric_limits<ValueType>::lowest());
-          }
-          this->data_.push_back(std::get<double>(var));
-        } else if (is_complex_matrix) {
-          if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
-            for (const auto &var : vars)
-              this->data_.push_back(std::get<std::complex<double>>(var));
-          } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
-            for (const auto &var : vars) {
-              this->data_.emplace_back(
-                  std::get<std::complex<double>>(var).real(),
-                  std::get<std::complex<double>>(var).imag());
-            }
-          } else
-            CHECK(false) << "Complex matrix must have floating point data type";
-        }
-      }
-      nnz_++;
-    }
+    auto family = mat.Type().Family();
+    while (mat.HasNext()) push_back(mat.Next());
     index_.push_back(nnz_);
-    if (num_zero_vars)
-      LOG(INFO) << "Number of zero vars: " << num_zero_vars;
     return absl::OkStatus();
   }
 
@@ -951,6 +967,7 @@ protected:
 
 private:
   IdxType nnz_ = 0;
+  PosType index_pos_end_ = static_cast<PosType>(-1);
   FlexIdxType index_;
   FlexPosType pos_;
 };
@@ -1044,22 +1061,17 @@ public:
     return absl::OkStatus();
   }
 
-  absl::Status ReadMatrixMarketFile(const std::string &mtx_path,
-                                    uint32_t bytes_per_pos = sizeof(PosType),
-                                    uint32_t bytes_per_idx = sizeof(IdxType)) {
+  absl::Status ReadMatrixMarketFile(const std::string &mtx_path) {
     auto status = SetTypeFromMatrixMarketFile(mtx_path);
     if (!status.ok()) return status;
 
     auto idx = var_.index();
     if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).ReadMatrixMarketFile(
-          mtx_path, bytes_per_pos, bytes_per_idx);
+      return std::get<kFlexInt64>(var_).ReadMatrixMarketFile(mtx_path);
     else if (idx == kDouble)
-      return std::get<kDouble>(var_).ReadMatrixMarketFile(
-          mtx_path, bytes_per_pos, bytes_per_idx);
+      return std::get<kDouble>(var_).ReadMatrixMarketFile(mtx_path);
     else
-      return std::get<kComplexDouble>(var_).ReadMatrixMarketFile(
-          mtx_path, bytes_per_pos, bytes_per_idx);
+      return std::get<kComplexDouble>(var_).ReadMatrixMarketFile(mtx_path);
   }
 
   absl::Status ReadPieRankMatrixFile(const std::string &prm_path) {

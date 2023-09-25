@@ -49,6 +49,8 @@ public:
 
   uint32_t DataDims() const { return data_dims_; }
 
+  bool SplitDataDims() const { return data_dim_stride_ > 1; }
+
   IdxType DataDimStride() const { return data_dim_stride_; }
 
   uint32_t IndexDim() const { return index_dim_; }
@@ -58,6 +60,12 @@ public:
   // Total number of elements (regardless of their values), where a single
   // element is a point with `data_dims` dimensions
   IdxType Elems() const { return elems_; }
+
+  std::pair<PosType, PosType> IdxToPos(IdxType idx) const {
+    return index_dim_ == 0
+           ? std::make_pair(idx / cols_, idx % cols_)
+           : std::make_pair(idx % rows_, idx / rows_);
+  }
 
   void InitData() { data_.clear(); data_.resize(rows_ * cols_ * data_dims_); }
 

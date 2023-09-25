@@ -40,6 +40,14 @@ public:
     kCoordinateRealSymmetric
   };
 
+  enum DataFamily : uint32_t {
+    kUnknownFamily,
+    kBoolFamily,
+    kIntegerFamily,
+    kRealFamily,
+    kComplexFamily
+  };
+
   static Enum FromString(absl::string_view str) {
     if (str == "UNK") return kUnknown;
     if (str == "ACG") return kArrayComplexGeneral;
@@ -81,7 +89,7 @@ public:
 
   MatrixType() = default;
 
-  MatrixType(Enum value) : val_(value) {}
+  MatrixType(Enum value) : val_(value) { family_ = MapToFamily(); }
 
   MatrixType(absl::string_view str) : val_(FromString(str)) {}
 
@@ -113,6 +121,19 @@ public:
     return val_ == kCoordinateIntegerSymmetric ||
            val_ == kCoordinatePatternSymmetric ||
            val_ == kCoordinateRealSymmetric;
+  }
+
+  DataFamily MapToFamily() const {
+    if (IsPattern()) return kBoolFamily;
+    if (IsInteger()) return kIntegerFamily;
+    if (IsReal()) return kRealFamily;
+    if (IsComplex()) return kComplexFamily;
+    return kUnknownFamily;
+  }
+
+  DataFamily Family() const {
+    DCHECK_EQ(family_, MapToFamily());
+    return family_;
   }
 
   constexpr operator Enum() const { return val_; }
@@ -189,7 +210,8 @@ public:
   }
 
 private:
-  Enum val_;
+  Enum val_ = kUnknown;
+  DataFamily family_ = kUnknownFamily;
 };
 
 class MatrixMarketIo {
@@ -330,7 +352,7 @@ public:
       }
     }
     count_++;
-    return std::make_tuple(first, second, vars);
+    return std::make_tuple(first - 1, second - 1, vars);
   }
 
   uint32_t Rows() const { return rows_; }
