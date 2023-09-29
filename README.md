@@ -55,65 +55,65 @@ For all experiments, I used a [Raspberry Pi 4 Model B](https://www.raspberrypi.c
 | 9   | [twitter-2010](https://sparse.tamu.edu/SNAP/twitter7)       | 41,652,230  | 1,468,365,182 |
 | 10  | [AGATHA\_2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015)       | 183,964,077 | 5,794,362,982 |
 
-The above table shows the sparse matrices used in the experiments. They are from the [SuiteSparse Matrix Collection](https://sparse.tamu.edu/) website, including [GATHA 2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015) as the largest instance in the collection. It is a deep-learning network with 5.8B parameters (or 11.6B if one counts each undirected edge as two parameters). Instead of referring to matrices by their names, the rest of the tables all use their problem number mentioned above (e.g., $p$\#10 refers to ``AGATHA\_2015").
+The above table shows the sparse matrices used in the experiments. They are from the [SuiteSparse Matrix Collection](https://sparse.tamu.edu/) website, including [GATHA 2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015) as the largest instance in the collection. It is a deep-learning network with 5.8B parameters (or 11.6B if one counts each undirected edge as two parameters). Instead of referring to matrices by their names, the rest of the tables all use their problem number mentioned above (e.g., $p$\#10 refers to AGATHA\_2015).
 
 | $p$\# | mtx size            | prm size | ratio | $s^*$ | cb | rb |
 |-|-|-|-|-|-|-|
-| 1   | 30,579,901      | 7,502,539              | 4.1$\times$           | 11                | 2                | 3              |
-| 2   | 70,636,197      | 16,946,668             | 4.2$\times$            | 13                | 2                | 3              |
-| 3   | 102,294,093     | 24,138,518             | 4.2$\times$            | 8                 | 2                | 3              |
-| 4   | 171,065,574     | 37,967,050             | 4.5$\times$            | 5                 | 1                | 3              |
-| 5   | 261,658,301     | 57,075,516             | 4.6$\times$            | 13                | 2                | 3              |
-| 6   | 642,663,421     | 145,792,458            | 4.4$\times$            | 16                | 3                | 3              |
-| 7   | 1,011,609,587   | 217,282,551            | 4.7$\times$            | 6                 | 2                | 3              |
-| 8   | 16,451,551,195  | 3,903,296,960          | 4.2$\times$            | 0                 | 4                | 4              |
-| 9   | 26,141,060,759  | 5,999,068,381          | 4.4$\times$            | 9                 | 3                | 4              |
-| 10  | 104,523,784,790 | 23,773,593,875         | 4.4$\times$            | 5                 | 3                | 4              |
+| 1   | 30,579,901      | 7,502,539              | 4.1x           | 11                | 2                | 3              |
+| 2   | 70,636,197      | 16,946,668             | 4.2x            | 13                | 2                | 3              |
+| 3   | 102,294,093     | 24,138,518             | 4.2x            | 8                 | 2                | 3              |
+| 4   | 171,065,574     | 37,967,050             | 4.5x            | 5                 | 1                | 3              |
+| 5   | 261,658,301     | 57,075,516             | 4.6x            | 13                | 2                | 3              |
+| 6   | 642,663,421     | 145,792,458            | 4.4x            | 16                | 3                | 3              |
+| 7   | 1,011,609,587   | 217,282,551            | 4.7x            | 6                 | 2                | 3              |
+| 8   | 16,451,551,195  | 3,903,296,960          | 4.2x            | 0                 | 4                | 4              |
+| 9   | 26,141,060,759  | 5,999,068,381          | 4.4x            | 9                 | 3                | 4              |
+| 10  | 104,523,784,790 | 23,773,593,875         | 4.4x            | 5                 | 3                | 4              |
 
 The table above is a comparison of encoding sizes, including [matrix market](https://math.nist.gov/MatrixMarket/formats.html) file size (mtx size), PieRank matrix file size (prm size), compression ratio (ratio), optimal number of sketch bits (_s_*), number of bytes for each element of *COL_INDEX* (cb) and *ROW_INDEX* (rb) in PieRank’s binary [CSC](https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_column_(CSC_or_CCS)) format.
 
 | $p$\#   |  mtx read (sec) |  prm read (sec) |  ratio | prm mmap (sec) |
 |-|-|-|-|-|
-| 1  | 1.41     | 0.16     | 8.8$\times$  | 0.0006   |
-| 2  | 3.52     | 0.17     | 20.4$\times$ | 0.0024   |
-| 3  | 4.93     | 0.14     | 34.3$\times$ | 0.0027   |
-| 4  | 7.06     | 0.60     | 11.7$\times$ | 0.0090   |
-| 5  | 10.61    | 1.43     | 7.4$\times$  | 0.0027   |
-| 6  | 28.29    | 3.97     | 7.1$\times$  | 0.0028   |
-| 7  | 52.75    | 3.91     | 13.5$\times$ | 0.0062   |
-| 8  | 721.53   | 17.50    | 41.2$\times$ | 0.0025   |
-| 9  | 896.75   | 83.93    | 10.7$\times$ | 0.0077   |
-| 10 | 3,524.49 | 727.82   | 4.8$\times$  | 0.1309   |
+| 1  | 1.41     | 0.16     | 8.8x  | 0.0006   |
+| 2  | 3.52     | 0.17     | 20.4x | 0.0024   |
+| 3  | 4.93     | 0.14     | 34.3x | 0.0027   |
+| 4  | 7.06     | 0.60     | 11.7x | 0.0090   |
+| 5  | 10.61    | 1.43     | 7.4x  | 0.0027   |
+| 6  | 28.29    | 3.97     | 7.1x  | 0.0028   |
+| 7  | 52.75    | 3.91     | 13.5x | 0.0062   |
+| 8  | 721.53   | 17.50    | 41.2x | 0.0025   |
+| 9  | 896.75   | 83.93    | 10.7x | 0.0077   |
+| 10 | 3,524.49 | 727.82   | 4.8x  | 0.1309   |
 
 The above table is a comparison of matrix read time in seconds, including matrix market read time, PRM read time, speedup ratio, and PRM [memory-map](https://en.wikipedia.org/wiki/Memory-mapped_file) time.
 
 | $p$\# | $GC$ (sec) | $PR_\textrm{RAM}$ (sec) | $PR_\textrm{RO}$ (sec) | ratio |
 |-|-|-|-|-|
-| 1   | 0.64          | 0.06        | 0.06       | 10.7$\times$ |
-| 2   | 1.23          | 0.06        | 0.07       | 17.6$\times$ |
-| 3   | 1.20          | 0.05        | 0.05       | 24.0$\times$ |
-| 4   | 3.74          | 0.21        | 0.22       | 17.0$\times$ |
-| 5   | 6.10          | 0.52        | 0.52       | 11.7$\times$ |
-| 6   | 12.04         | 1.42        | 1.43       | 8.4$\times$  |
-| 7   | 15.42         | 1.57        | 1.59       | 9.7$\times$  |
-| 8   | 152.03        | 3.62        | 4.34       | 35.0$\times$ |
-| 9   | 386.75        | 44.47       | 44.60      | 8.7$\times$  |
-| 10  | 2,207.72      | MEM         | 328.11     | 6.7$\times$  |
+| 1   | 0.64          | 0.06        | 0.06       | 10.7x |
+| 2   | 1.23          | 0.06        | 0.07       | 17.6x |
+| 3   | 1.20          | 0.05        | 0.05       | 24.0x |
+| 4   | 3.74          | 0.21        | 0.22       | 17.0x |
+| 5   | 6.10          | 0.52        | 0.52       | 11.7x |
+| 6   | 12.04         | 1.42        | 1.43       | 8.4x  |
+| 7   | 15.42         | 1.57        | 1.59       | 9.7x  |
+| 8   | 152.03        | 3.62        | 4.34       | 35.0x |
+| 9   | 386.75        | 44.47       | 44.60      | 8.7x  |
+| 10  | 2,207.72      | MEM         | 328.11     | 6.7x  |
 
 
 The table above is a comparison of average [PageRank](https://en.wikipedia.org/wiki/PageRank) iteration time, including [GraphChi](https://github.com/GraphChi/graphchi-cpp) (*GC*), in-RAM PieRank (*PR<sub>RAM</sub>*), [RAM-oblivious](https://en.wikipedia.org/wiki/Cache-oblivious_algorithm) PieRank (*PR<sub>RO</sub>*), and speedup ratio for *PR<sub>RO</sub>*.
 
 | $p$\# | $GC$ (sec) | $PR_\textrm{RAM}$ (sec) | $PR_\textrm{RO}$ (sec) | ratio |
 |-|-|-|-|-|
-| 1   | 2.19          | 0.06        | 0.06       | 36.5$\times$ |
-| 2   | 3.29          | 0.06        | 0.07       | 47.0$\times$ |
-| 3   | 3.88          | 0.05        | 0.05       | 77.6$\times$ |
-| 4   | 14.22         | 0.25        | 0.25       | 56.9$\times$ |
-| 5   | 12.60         | 0.60        | 0.61       | 20.7$\times$ |
-| 6   | 27.54         | 1.57        | 1.62       | 17.0$\times$ |
-| 7   | 35.43         | 1.49        | 1.58       | 22.4$\times$ |
-| 8   | 195.48        | 4.36        | 6.12       | 31.9$\times$ |
-| 9   | 812.55        | 47.09       | 46.50      | 17.5$\times$ |
+| 1   | 2.19          | 0.06        | 0.06       | 36.5x |
+| 2   | 3.29          | 0.06        | 0.07       | 47.0x |
+| 3   | 3.88          | 0.05        | 0.05       | 77.6x |
+| 4   | 14.22         | 0.25        | 0.25       | 56.9x |
+| 5   | 12.60         | 0.60        | 0.61       | 20.7x |
+| 6   | 27.54         | 1.57        | 1.62       | 17.0x |
+| 7   | 35.43         | 1.49        | 1.58       | 22.4x |
+| 8   | 195.48        | 4.36        | 6.12       | 31.9x |
+| 9   | 812.55        | 47.09       | 46.50      | 17.5x |
 | 10  | MEM           | MEM         | 350.06     | N/A   |
 
 The above table is a comparison of average [connected-components](https://en.wikipedia.org/wiki/Connected-component_labeling) iteration time, including [GraphChi](https://github.com/GraphChi/graphchi-cpp) (*GC*), in-RAM PieRank (*PR<sub>RAM</sub>*), [RAM-oblivious](https://en.wikipedia.org/wiki/Cache-oblivious_algorithm) PieRank (*PR<sub>RO</sub>*), and speedup ratio for *PR<sub>RO</sub>*.
