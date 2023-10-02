@@ -14,7 +14,7 @@ using namespace std;
 
 using namespace pierank;
 
-static bool kGeneratePieRankMatrixFile = false;
+static constexpr bool kGeneratePieRankMatrixFile = false;
 
 using Pos2d = pair<uint32_t, uint32_t>;
 
@@ -459,7 +459,7 @@ vector<pair<Pos2d, vector<double>>> Real2dTestMatrixTestEntries() {
 }
 
 TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
-  auto file_path = TestDataFilePath("real_2d_test.mtx");
+  auto file_path = TestDataFilePath("real_3d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
@@ -475,7 +475,7 @@ TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
 }
 
 TEST(SparseMatrixTests, ToDenseReal2dTestMtxFile) {
-  auto file_path = TestDataFilePath("real_2d_test.mtx");
+  auto file_path = TestDataFilePath("real_3d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
@@ -488,4 +488,12 @@ TEST(SparseMatrixTests, ToDenseReal2dTestMtxFile) {
 
   SparseMatrix<uint32_t, uint64_t> mat0(dense);
   EXPECT_EQ(mat, mat0);
+}
+
+TEST(SparseMatrixTests, ReadTensorMtxFile) {
+  auto file_path = TestDataFilePath("real_4d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using SubMat = SparseMatrix<uint32_t, uint64_t>;
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat;
+  // EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 }

@@ -140,7 +140,7 @@ public:
 
   using FlexPosIterator = typename FlexPosType::Iterator;
 
-  using ValueType = typename DataContainerType::value_type;
+  using value_type = typename DataContainerType::value_type;
 
   using DenseType = Matrix<PosType, IdxType, DataContainerType>;
 
@@ -179,7 +179,7 @@ public:
         std::vector<MatrixMarketIo::Var> vars;
         for (uint32_t d = 0; d < data_dims; ++d)
           vars.push_back(dense(row, col, d));
-        push_back({row, col, vars});
+        push_back({{row, col}, vars});
       }
     }
     ++index_pos_end_;
@@ -197,7 +197,7 @@ public:
   inline static constexpr DataType StaticDataType() {
     if constexpr (is_specialization_v<DataContainerType, FlexArray>)
       return DataType::kFlex;
-    return DataType::FromValueType<ValueType>();
+    return DataType::FromValueType<value_type>();
   }
 
   DenseType ToDense(bool split_data_dims = false) const {
@@ -223,7 +223,7 @@ public:
     return res;
   }
 
-  ValueType operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
+  value_type operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
     PosType non_idx_pos;
     FlexPosIterator first, last;
     if (this->index_dim_ == 0) {
@@ -300,8 +300,8 @@ public:
     } else {
       if constexpr (!is_specialization_v<DataContainerType, std::vector>)
         LOG(WARNING) << "Unknown data container type";
-      WriteData<std::ostream, ValueType>(&os, matrix.data_.data(),
-                                         matrix.data_.size());
+      WriteData<std::ostream, value_type>(&os, matrix.data_.data(),
+                                          matrix.data_.size());
     }
 
     return os;
@@ -382,7 +382,7 @@ public:
         LOG(ERROR) << "Error reading matrix data size";
         return absl::InternalError(absl::StrCat("Error reading file: ", path));
       }
-      size *= sizeof(ValueType);
+      size *= sizeof(value_type);
       auto mmap = MmapReadOnlyFile(path, offset, size);
       offset += size;
       if (!mmap.ok()) return mmap.status();
@@ -399,13 +399,13 @@ public:
   }
 
   void push_back(const Entry &entry) {
-    const auto & [row, col, vars] = entry;
+    const auto & [pos, vars] = entry;
     auto family = this->Type().Family();
     DCHECK(family == MatrixType::kBoolFamily ||
            vars.size() == this->data_dims_);
-    DCHECK_GE(row, 0);
-    DCHECK_GE(col, 0);
-    PosType index_pos = this->index_dim_ == 0 ? row : col;
+    DCHECK_GE(pos[0], 0);
+    DCHECK_GE(pos[1], 0);
+    PosType index_pos = pos[this->index_dim_];
     if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) return;
     while (index_pos_end_ != index_pos) {
       index_.push_back(nnz_);
@@ -413,29 +413,29 @@ public:
       DCHECK_LE(index_pos_end_, index_pos);
       DCHECK_EQ(index_[index_pos_end_], nnz_);
     }
-    pos_.push_back(this->index_dim_ ? row : col);
+    pos_.push_back(this->index_dim_ ? pos[0] : pos[1]);
     for (const auto & var : vars) {
       if (family == MatrixType::kIntegerFamily) {
-        if constexpr (std::is_integral_v<ValueType>) {
+        if constexpr (std::is_integral_v<value_type>) {
           DCHECK_LE(std::get<int64_t>(var),
-                    std::numeric_limits<ValueType>::max());
+                    std::numeric_limits<value_type>::max());
           DCHECK_GE(std::get<int64_t>(var),
-                    std::numeric_limits<ValueType>::lowest());
+                    std::numeric_limits<value_type>::lowest());
         }
         this->data_.push_back(std::get<int64_t>(var));
       } else if (family == MatrixType::kRealFamily) {
-        if constexpr (std::is_floating_point_v<ValueType>) {
+        if constexpr (std::is_floating_point_v<value_type>) {
           DCHECK_LE(std::get<double>(var),
-                    std::numeric_limits<ValueType>::max());
+                    std::numeric_limits<value_type>::max());
           DCHECK_GE(std::get<double>(var),
-                    std::numeric_limits<ValueType>::lowest());
+                    std::numeric_limits<value_type>::lowest());
         }
         this->data_.push_back(std::get<double>(var));
       } else if (family == MatrixType::kComplexFamily) {
-        if constexpr (std::is_same_v<ValueType, std::complex<double>>) {
+        if constexpr (std::is_same_v<value_type, std::complex<double>>) {
           for (const auto &var : vars)
             this->data_.push_back(std::get<std::complex<double>>(var));
-        } else if constexpr (std::is_same_v<ValueType, std::complex<float>>) {
+        } else if constexpr (std::is_same_v<value_type, std::complex<float>>) {
           for (const auto &var : vars) {
             this->data_.emplace_back(
                 std::get<std::complex<double>>(var).real(),
@@ -769,7 +769,7 @@ public:
       absl::StrAppend(&res, tab, "data: ",
                       this->data_mmap_.empty()
                       ? VectorToString(this->data_, max_items)
-                      : VectorToString<decltype(this->data_mmap_), ValueType>(
+                      : VectorToString<decltype(this->data_mmap_), value_type>(
                           this->data_mmap_, max_items));
     }
     absl::StrAppend(&res, "\n");
@@ -793,15 +793,15 @@ public:
   }
 
 protected:
-  ValueType At(IdxType idx, uint32_t data_dim = 0) const {
+  value_type At(IdxType idx, uint32_t data_dim = 0) const {
     idx = idx * this->data_dims_ + data_dim;
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
       DCHECK(this->data_mmap_.empty());
       return this->data_[idx];
     } else {
       return this->data_mmap_.empty()
-             ? reinterpret_cast<const ValueType *>(this->data_.data())[idx]
-             : reinterpret_cast<const ValueType *>(this->data_mmap_.data())[idx];
+             ? reinterpret_cast<const value_type*>(this->data_.data())[idx]
+             : reinterpret_cast<const value_type*>(this->data_mmap_.data())[idx];
     }
   }
 

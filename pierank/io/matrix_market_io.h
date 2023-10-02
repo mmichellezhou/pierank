@@ -219,7 +219,7 @@ public:
   using Var =
       std::variant<std::monostate, int64_t, double, std::complex<double>>;
 
-  using Entry = std::tuple<uint32_t, uint32_t, std::vector<Var>>;
+  using Entry = std::pair<std::vector<uint64_t>, std::vector<Var>>;
 
   inline static bool HasMtxFileExtension(absl::string_view path) {
     return absl::EndsWith(path, ".mtx");
@@ -308,18 +308,28 @@ public:
     data_dims_ = 1;
     row_major_ = false;
     if (line[0] == '[' && line.back() == ']') {
-      const auto&& dict = StringToDict(line.substr(1, line.size() - 2));
-      auto it = dict.find("_error_");
-      if (it != dict.end()) {        ;
-        LOG(ERROR) << "Error parsing '" << line << "': " << it->second;
+      auto dict_or = StringToDict(line, ";", ":", "[", "]");
+      if (!dict_or.ok()) {
+        LOG(ERROR) << "Error parsing '" << line << "': " << dict_or.status();
         return MatrixType::kUnknown;
       }
+      auto dict = *std::move(dict_or);
       for (const auto& [key, value] : dict) {
-        if (key == "dims") data_dims_ = std::stoi(value);
+        if (key == "shape") {
+          auto shape_or = StringToVector<uint32_t>(value, ",", "(", ")");
+          if (!shape_or.ok()) {
+            LOG(ERROR) << "Bad shape '" << value << "': " << shape_or.status();
+            return MatrixType::kUnknown;
+          }
+          data_dims_ = shape_or->back();
+        }
         else if (key == "order") {
-          if (value == "row") row_major_ = true;
-          else if (value == "col" || value == "column") row_major_ = false;
-          else return MatrixType::kUnknown;
+          auto order_or = StringToVector<uint32_t>(value, ",", "(", ")");
+          if (!order_or.ok()) {
+            LOG(ERROR) << "Bad order '" << value << "': " << order_or.status();
+            return MatrixType::kUnknown;
+          }
+          row_major_ = order_or->front() == 0;
         }
       }
     }
@@ -332,8 +342,10 @@ public:
   bool HasNext() const { return count_ < nnz_; }
 
   Entry Next() {
-    uint32_t first, second;
-    is_ >> first >> second;
+    std::vector<uint64_t> pos(2);
+    is_ >> pos[0] >> pos[1];
+    --pos[0];
+    --pos[1];
     std::vector<Var> vars;
     uint32_t data_dims = data_dims_;
     while (data_dims--) {
@@ -352,7 +364,7 @@ public:
       }
     }
     count_++;
-    return std::make_tuple(first - 1, second - 1, vars);
+    return std::make_pair(pos, vars);
   }
 
   uint32_t Rows() const { return rows_; }
