@@ -55,7 +55,7 @@ For all experiments, I used a [Raspberry Pi 4 Model B](https://www.raspberrypi.c
 | 9   | [twitter-2010](https://sparse.tamu.edu/SNAP/twitter7)       | 41,652,230  | 1,468,365,182 |
 | 10  | [AGATHA\_2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015)       | 183,964,077 | 5,794,362,982 |
 
-The above table shows the sparse matrices used in the experiments. They are from the [SuiteSparse Matrix Collection](https://sparse.tamu.edu/) website, including [GATHA 2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015) as the largest instance in the collection. It is a deep-learning network with 5.8B parameters (or 11.6B if one counts each undirected edge as two parameters). Instead of referring to matrices by their names, the rest of the tables all use their problem number mentioned above (e.g., $p$\#10 refers to AGATHA\_2015).
+The above table shows the sparse matrices used in the experiments. They are from the [SuiteSparse Matrix Collection](https://sparse.tamu.edu/) website, including [AGATHA 2015](https://sparse.tamu.edu/Sybrandt/AGATHA_2015) as the largest instance in the collection. It is a deep-learning network with 5.8B parameters (or 11.6B if one counts each undirected edge as two parameters). Instead of referring to matrices by their names, the rest of the tables all use their problem number mentioned above (e.g., $p$\#10 refers to AGATHA\_2015).
 
 | $p$\# | mtx size            | prm size | ratio | $s^*$ | cb | rb |
 |-|-|-|-|-|-|-|
