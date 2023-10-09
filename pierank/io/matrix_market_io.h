@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstdint>
 #include <fstream>
+#include <numeric>
 #include <string>
 #include <tuple>
 #include <variant>
@@ -244,9 +245,18 @@ public:
   MatrixMarketIo(const std::string &file_path) : is_(file_path) {
     if (static_cast<bool>(is_)) {
       type_ = ReadBanner();
+      uint64_t rows, cols;
       if (type_ != MatrixType::kUnknown) {
         SkipComments();
-        is_ >> rows_ >> cols_ >> nnz_;
+        is_ >> rows >> cols >> nnz_;
+      }
+      if (!shape_.empty()) {
+        CHECK_GE(order_.size(), 3);
+        CHECK_EQ(rows, shape_[std::min(order_[0], order_[1])]);
+        CHECK_EQ(cols, shape_[std::max(order_[0], order_[1])]);
+      } else {
+        shape_ = {rows, cols, 1};
+        order_ = {1, 0, 2};
       }
     }
   }
@@ -305,8 +315,6 @@ public:
     std::string line;
     std::getline(is_, line);
     RemoveWhiteSpaces(line);
-    data_dims_ = 1;
-    row_major_ = false;
     if (line[0] == '[' && line.back() == ']') {
       auto dict_or = StringToDict(line, ";", ":", "[", "]");
       if (!dict_or.ok()) {
@@ -316,12 +324,13 @@ public:
       auto dict = *std::move(dict_or);
       for (const auto& [key, value] : dict) {
         if (key == "shape") {
-          auto shape_or = StringToVector<uint32_t>(value, ",", "(", ")");
+          auto shape_or = StringToVector<uint64_t>(value, ",", "(", ")");
           if (!shape_or.ok()) {
             LOG(ERROR) << "Bad shape '" << value << "': " << shape_or.status();
             return MatrixType::kUnknown;
           }
-          data_dims_ = shape_or->back();
+          shape_ = *std::move(shape_or);
+          CHECK_GE(shape_.size(), 3);
         }
         else if (key == "order") {
           auto order_or = StringToVector<uint32_t>(value, ",", "(", ")");
@@ -329,13 +338,20 @@ public:
             LOG(ERROR) << "Bad order '" << value << "': " << order_or.status();
             return MatrixType::kUnknown;
           }
-          row_major_ = order_or->front() == 0;
+          order_ = *std::move(order_or);
+          CHECK_GE(order_.size(), 3);
         }
       }
     }
     // Pattern matrix's data dims should always be 1
-    if (dtype == "pattern" && data_dims_ != 1)
+    if (dtype == "pattern" && (!shape_.empty() && shape_.back() != 1))
       return MatrixType::kUnknown;
+    if (!shape_.empty() && order_.empty()) {
+      order_.resize(shape_.size());
+      std::iota(order_.begin(), order_.end(), 0);
+    }
+    CHECK_EQ(shape_.empty(), order_.empty());
+    CHECK_EQ(shape_.size(), order_.size());
     return res;
   }
 
@@ -347,7 +363,7 @@ public:
     --pos[0];
     --pos[1];
     std::vector<Var> vars;
-    uint32_t data_dims = data_dims_;
+    uint32_t data_dims = DataDims();
     while (data_dims--) {
       if (type_.IsInteger()) {
         int64_t value;
@@ -367,9 +383,9 @@ public:
     return std::make_pair(pos, vars);
   }
 
-  uint32_t Rows() const { return rows_; }
+  uint32_t Rows() const { return shape_[std::min(order_[0], order_[1])]; }
 
-  uint32_t Cols() const { return cols_; }
+  uint32_t Cols() const { return shape_[std::max(order_[0], order_[1])]; }
 
   uint64_t NumNonZeros() const { return nnz_; }
 
@@ -377,30 +393,29 @@ public:
 
   const MatrixType &Type() const { return type_; }
 
-  uint32_t DataDims() const { return data_dims_; }
+  const std::vector<uint64_t>& Shape() const { return shape_; }
 
-  bool RowMajor() const { return row_major_; }
+  const std::vector<uint32_t>& Order() const { return order_; }
+
+  uint32_t DataDims() const { return shape_.back(); }
 
 private:
   MatrixType type_ = MatrixType::kUnknown;
-  uint32_t data_dims_ = 1;  // dimensions for a single non-zero value
-  bool row_major_ = false;
-  uint32_t rows_;
-  uint32_t cols_;
+  std::vector<uint64_t> shape_;
+  std::vector<uint32_t> order_;
   uint64_t nnz_;
   std::ifstream is_;
   uint64_t count_ = 0;
 };
 
-// Tuple: <MatrixType, #data_dims, bool, #rows, #cols, #nnz>
-inline
-absl::StatusOr<std::tuple<MatrixType, uint32_t, bool, uint64_t, uint64_t, uint64_t>>
+// Tuple: <MatrixType, Shape, Order, #nnz>
+inline absl::StatusOr<std::tuple<MatrixType, const std::vector<uint64_t>&,
+    const std::vector<uint32_t>&, uint64_t>>
 MatrixMarketFileInfo(const std::string &mtx_path) {
-  std::tuple<MatrixType, uint32_t, bool, uint64_t, uint64_t, uint64_t> res;
   MatrixMarketIo mat(mtx_path);
   if (!mat.ok()) return absl::InternalError("Bad matrix market file");
-  return std::make_tuple(mat.Type(), mat.DataDims(), mat.RowMajor(),
-                         mat.Rows(), mat.Cols(), mat.NumNonZeros());
+  return std::make_tuple(mat.Type(), mat.Shape(), mat.Order(),
+      mat.NumNonZeros());
 }
 
 inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
@@ -409,19 +424,30 @@ inline MatrixType MatrixMarketFileMatrixType(const std::string &mtx_path) {
     LOG(ERROR) << info.status().message();
     return MatrixType::kUnknown;
   }
-  auto [type, data_dims, row_major, rows, cols, nnz] = *std::move(info);
+  auto [type, shape, order, nnz] = *std::move(info);
   return type;
 }
 
-inline absl::StatusOr<bool>
-MatrixMarketFileIsRowMajor(const std::string &mtx_path) {
+inline absl::StatusOr<std::vector<uint64_t>>
+MatrixMarketFileShape(const std::string &mtx_path) {
   auto info = MatrixMarketFileInfo(mtx_path);
   if (!info.ok()) {
     LOG(ERROR) << info.status().message();
     return info.status();
   }
-  auto [type, data_dims, row_major, rows, cols, nnz] = *std::move(info);
-  return row_major;
+  auto [type, shape, order, nnz] = *std::move(info);
+  return shape;
+}
+
+inline absl::StatusOr<std::vector<uint32_t>>
+MatrixMarketFileOrder(const std::string &mtx_path) {
+  auto info = MatrixMarketFileInfo(mtx_path);
+  if (!info.ok()) {
+    LOG(ERROR) << info.status().message();
+    return info.status();
+  }
+  auto [type, shape, order, nnz] = *std::move(info);
+  return order;
 }
 
 }  // namespace pierank

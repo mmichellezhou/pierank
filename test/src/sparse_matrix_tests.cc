@@ -449,7 +449,7 @@ TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, vector<double>>> Real2dTestMatrixTestEntries() {
+vector<pair<Pos2d, vector<double>>> Real3dTestMatrixTestEntries() {
   return { {{0, 0}, {0, 0}},
            {{2, 0}, {3.11, 3.12}}, {{4, 0}, {5.11, 5.12}},
            {{0, 1}, {1.21, 1.22}}, {{2, 1}, {3.21, 3.22}},
@@ -458,13 +458,13 @@ vector<pair<Pos2d, vector<double>>> Real2dTestMatrixTestEntries() {
            {{2, 4}, {3.51, 3.52}}};
 }
 
-TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
+TEST(SparseMatrixTests, ReadReal3dTestMtxFile) {
   auto file_path = TestDataFilePath("real_3d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  CheckSparseMatrix(mat, Real2dTestMatrixTestEntries());
+  CheckSparseMatrix(mat, Real3dTestMatrixTestEntries());
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
   if (kGeneratePieRankMatrixFile) {
     EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
@@ -474,17 +474,17 @@ TEST(SparseMatrixTests, ReadReal2dTestMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-TEST(SparseMatrixTests, ToDenseReal2dTestMtxFile) {
+TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   auto file_path = TestDataFilePath("real_3d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
   auto dense = mat.ToDense(/*split_data_dims=*/false);
-  CheckDenseMatrix(dense, Real2dTestMatrixTestEntries());
+  CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
 
   dense = mat.ToDense(/*split_data_dims=*/true);
-  CheckDenseMatrix(dense, Real2dTestMatrixTestEntries());
+  CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
 
   SparseMatrix<uint32_t, uint64_t> mat0(dense);
   EXPECT_EQ(mat, mat0);

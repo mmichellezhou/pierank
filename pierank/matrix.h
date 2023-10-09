@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 #include "absl/status/status.h"
 
@@ -21,14 +22,16 @@ template<typename PosType, typename IdxType,
     typename DataContainerType = std::vector<double>>
 class Matrix {
 public:
-  using ValueType = typename DataContainerType::value_type;
+  using value_type = typename DataContainerType::value_type;
 
   Matrix() = default;
 
   Matrix(MatrixType type, uint32_t data_dims, bool split_data_dims,
          PosType rows, PosType cols, uint32_t index_dim) :
-      type_(type), data_dims_(data_dims), rows_(rows), cols_(cols),
-      elems_(rows * cols), index_dim_(index_dim) {
+      type_(type), elems_(rows * cols) {
+    shape_ = {rows, cols, data_dims};
+    CHECK_LT(index_dim, 2);
+    order_ = {index_dim, 1 - index_dim, 2};
     data_dim_stride_ = split_data_dims ? elems_ : 1;
     CHECK_LE(rows * cols, std::numeric_limits<IdxType>::max());
   }
@@ -41,44 +44,53 @@ public:
 
   Matrix &operator=(Matrix &&) = default;
 
-  PosType Rows() const { return rows_; }
+  const std::vector<uint64_t> &Shape() const { return shape_; }
 
-  PosType Cols() const { return cols_; }
+  const std::vector<uint32_t> &Order() const { return order_; }
+
+  PosType Rows() const { return shape_[std::min(order_[0], order_[1])]; }
+
+  PosType Cols() const { return shape_[std::max(order_[0], order_[1])]; }
 
   const MatrixType &Type() const { return type_; }
 
-  uint32_t DataDims() const { return data_dims_; }
+  uint32_t DataDims() const { return shape_.back(); }
 
   bool SplitDataDims() const { return data_dim_stride_ > 1; }
 
   IdxType DataDimStride() const { return data_dim_stride_; }
 
-  uint32_t IndexDim() const { return index_dim_; }
+  uint32_t IndexDim() const { return order_.front(); }
 
-  PosType MaxDimSize() const { return std::max(rows_, cols_); }
+  PosType MaxDimSize() const {
+    return std::max(shape_[order_[0]], shape_[order_[1]]);
+  }
 
   // Total number of elements (regardless of their values), where a single
   // element is a point with `data_dims` dimensions
   IdxType Elems() const { return elems_; }
 
   std::pair<PosType, PosType> IdxToPos(IdxType idx) const {
-    return index_dim_ == 0
-           ? std::make_pair(idx / cols_, idx % cols_)
-           : std::make_pair(idx % rows_, idx / rows_);
+    return order_[0] < order_[1]
+           ? std::make_pair(idx / Cols(), idx % Cols())
+           : std::make_pair(idx % Rows(), idx / Rows());
   }
 
-  void InitData() { data_.clear(); data_.resize(rows_ * cols_ * data_dims_); }
+  void InitData() {
+    data_.clear();
+    data_.resize(shape_[order_[0]] * shape_[order_[1]] * DataDims());
+  }
 
-  void Set(IdxType idx, ValueType val) {
+  void Set(IdxType idx, value_type val) {
     if constexpr (is_specialization_v<DataContainerType, FlexArray>)
       return data_.SetItem(idx, val);
     data_[idx] = val;
   }
 
-  ValueType operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
+  value_type operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
     typename DataContainerType::size_type idx =
-        index_dim_ == 0 ? row * cols_ + col : col * rows_ + row;
-    if (data_dim_stride_ == 1) idx = idx * data_dims_ + data_dim;
+        order_[0] < order_[1] ? row * Cols() + col : col * Rows() + row;
+    if (data_dim_stride_ == 1) idx = idx * DataDims() + data_dim;
     else idx += data_dim * elems_;
     return data_[idx];
   }
@@ -90,12 +102,16 @@ public:
 protected:
   absl::Status status_;
   MatrixType type_ = MatrixType::kUnknown;
-  uint32_t data_dims_ = 1;  // dimensions for an element of data_
-  IdxType data_dim_stride_ = 1;  // distance b/n 2 consecutive dims of an elem
-  PosType rows_ = 0;
-  PosType cols_ = 0;
-  IdxType elems_ = 0;  // == rows_ * cols_
-  uint32_t index_dim_ = 0;
+  // Size of each dim, including sub-matrix in data_, where the last dim
+  // is ALWAYS the data dim, eg, {#rows, #cols, 1} for scalar data_ or
+  // {#rows, #cols, 2} for 2D data_
+  std::vector<uint64_t> shape_;
+  // Storage order of dims in shape_, eg, {0, 1, 2} for row-major or
+  // {1, 0, 2} for column-major.
+  // For SparseMatrix, last (=data) dim is ALWAYS last in order_
+  std::vector<uint32_t> order_;
+  IdxType data_dim_stride_ = 1;  // distance of consecutive dims of a data point
+  IdxType elems_ = 0;  // == shape_[order_[0]] * shape_[order_[1]]
   DataContainerType data_;
   mio::mmap_source data_mmap_;
 };

@@ -372,15 +372,33 @@ inline bool WriteInteger(OutputStreamType *os, ValueType val,
 }
 
 template<typename OutputStreamType>
-inline bool WriteUint32(OutputStreamType *os, uint32_t val,
-                        uint64_t size = sizeof(uint32_t)) {
-  return WriteInteger<uint32_t, OutputStreamType>(os, val, size);
+inline bool WriteUint32(OutputStreamType *os, uint32_t val) {
+  return WriteInteger<uint32_t, OutputStreamType>(os, val);
 }
 
 template<typename OutputStreamType>
-inline bool WriteUint64(OutputStreamType *os, uint64_t val,
-                        uint64_t size = sizeof(uint64_t)) {
-  return WriteInteger<uint64_t, OutputStreamType>(os, val, size);
+inline bool WriteUint64(OutputStreamType *os, uint64_t val) {
+  return WriteInteger<uint64_t, OutputStreamType>(os, val);
+}
+
+template<typename OutputStreamType>
+inline bool WriteUint32Vector(OutputStreamType *os,
+                              const std::vector<uint32_t> &vals) {
+  if (!WriteUint64(os, vals.size())) return false;
+  for (const auto val : vals) {
+    if (!WriteUint32(os, val)) return false;
+  }
+  return true;
+}
+
+template<typename OutputStreamType>
+inline bool WriteUint64Vector(OutputStreamType *os,
+                              const std::vector<uint64_t> &vals) {
+  if (!WriteUint64(os, vals.size())) return false;
+  for (const auto val : vals) {
+    if (!WriteUint64(os, val)) return false;
+  }
+  return true;
 }
 
 template<typename InputStreamType, typename DataType = char>
@@ -625,6 +643,30 @@ inline uint32_t ReadUint32(InputStreamType *is, uint64_t *offset = nullptr) {
 template<typename InputStreamType>
 inline uint64_t ReadUint64(InputStreamType *is, uint64_t *offset = nullptr) {
   return ReadInteger<uint64_t, InputStreamType>(is, sizeof(uint64_t), offset);
+}
+
+template<typename InputStreamType>
+inline std::vector<uint32_t> ReadUint32Vector(InputStreamType *is,
+                                              uint64_t *offset = nullptr) {
+  std::vector<uint32_t> res;
+  auto size = ReadUint64(is, offset);
+  while (size--) {
+    auto val = ReadUint32(is, offset);
+    res.push_back(val);
+  }
+  return res;
+}
+
+template<typename InputStreamType>
+inline std::vector<uint64_t> ReadUint64Vector(InputStreamType *is,
+                                              uint64_t *offset = nullptr) {
+  std::vector<uint64_t> res;
+  auto size = ReadUint64(is, offset);
+  while (size--) {
+    auto val = ReadUint64(is, offset);
+    res.push_back(val);
+  }
+  return res;
 }
 
 template<typename InputStreamType>
