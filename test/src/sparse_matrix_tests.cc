@@ -29,9 +29,9 @@ void CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
 template<typename M, typename V>
 void
 CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
-  uint32_t data_dims = mat.DataDims();
+  uint32_t depths = mat.Depths();
   for (auto && [pos2d, values] : entries) {
-    EXPECT_EQ(values.size(), data_dims);
+    EXPECT_EQ(values.size(), depths);
     auto && [row, col] = pos2d;
     for (size_t d = 0; d < values.size(); ++d)
       EXPECT_EQ(mat(row, col, d), values[d]);
@@ -42,9 +42,9 @@ template<typename M, typename V>
 void
 CheckDenseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
   set<Pos2d> checked;
-  uint32_t data_dims = mat.DataDims();
+  uint32_t depths = mat.Depths();
   for (auto && [pos2d, values] : entries) {
-    EXPECT_EQ(values.size(), data_dims);
+    EXPECT_EQ(values.size(), depths);
     auto && [row, col] = pos2d;
     checked.insert({row, col});
     for (size_t d = 0; d < values.size(); ++d)
@@ -54,7 +54,7 @@ CheckDenseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
   for (int i = 0; i < mat.Rows(); ++i) {
     for (int j = 0; j < mat.Cols(); ++j) {
       if (checked.find({i, j}) != checked.end()) continue;
-      for (size_t d = 0; d < data_dims; ++d)
+      for (size_t d = 0; d < depths; ++d)
         EXPECT_EQ(mat(i, j, d), 0);
     }
   }
@@ -480,14 +480,17 @@ TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 
-  auto dense = mat.ToDense(/*split_data_dims=*/false);
-  CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
-
-  dense = mat.ToDense(/*split_data_dims=*/true);
+  auto dense = mat.ToDense(/*split_depths=*/false);
   CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
 
   SparseMatrix<uint32_t, uint64_t> mat0(dense);
   EXPECT_EQ(mat, mat0);
+
+  dense = mat.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t> mat1(dense);
+  EXPECT_EQ(mat, mat1);
 }
 
 TEST(SparseMatrixTests, ReadTensorMtxFile) {

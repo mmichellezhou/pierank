@@ -3,7 +3,7 @@
 % E1: It is a 3D tensor with shape (5, 5, 2)
 % E2: The storage order is (0, 1, 2), same as a multi-dimensional C array
 % Assumptions:
-% A1: The last dimension is the data dimension, which is ALWAYS dense.
+% A1: The last dimension is depth, which is ALWAYS dense.
 % A2: The last dimension is ALWAYS the last in the storage order
 % A3: The #rows & #cols are determined by the first two dimensions in the
 %     storage order, such that if order[0] < order[1], then:

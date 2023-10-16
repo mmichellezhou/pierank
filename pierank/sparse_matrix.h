@@ -162,20 +162,28 @@ public:
 
   SparseMatrix(const DenseType &dense) :
       Matrix<PosType, IdxType, DataContainerType>(dense.Type(),
-                                                  dense.DataDims(),
-                                                  dense.SplitDataDims(),
-                                                  dense.Rows(), dense.Cols(),
-                                                  dense.IndexDim()) {
-    const uint32_t data_dims = dense.DataDims();
+                                                  dense.Shape(),
+                                                  dense.Order()) {
+    if (dense.SplitDepths()) {
+      // SparseMatrix can't split data dims, which thus must be last in order_
+      auto it =
+          std::find(this->order_.begin(), this->order_.end(), this->DepthDim());
+      CHECK(it != this->order_.end());
+      std::rotate(it, it + 1, this->order_.end());
+    }
+
+    const uint32_t depths = dense.Depths();
+    const uint64_t elem_stride = dense.ElemStride();
     for (IdxType i = 0; i < dense.Elems(); ++i) {
-      auto && [row, col] = dense.IdxToPos(i);
+      auto && [row, col, depth] = dense.IdxToPos(i * elem_stride);
+      DCHECK_EQ(depth, 0);
       bool all_zeros = true;
-      for (uint32_t d = 0; d < data_dims && all_zeros; ++d) {
+      for (uint32_t d = 0; d < depths && all_zeros; ++d) {
         if (dense(row, col, d) != 0) all_zeros = false;
       }
       if (!all_zeros) {
         std::vector<MatrixMarketIo::Var> vars;
-        for (uint32_t d = 0; d < data_dims; ++d)
+        for (uint32_t d = 0; d < depths; ++d)
           vars.push_back(dense(row, col, d));
         push_back({{row, col}, vars});
       }
@@ -198,30 +206,33 @@ public:
     return DataType::FromValueType<value_type>();
   }
 
-  DenseType ToDense(bool split_data_dims = false) const {
-    DenseType res(this->type_, this->DataDims(), split_data_dims,
-                  this->Rows(), this->Cols(), this->IndexDim());
+  DenseType ToDense(bool split_depths = false) const {
+    std::vector<uint64_t> shape = this->Shape();
+    std::vector<uint32_t> order = this->Order();
+    if (split_depths)
+      std::rotate(order.begin(), order.begin() + this->DepthDim(), order.end());
+    DenseType res(this->type_, shape, order);
     res.InitData();
-    PosType items_per_index_pos = this->IndexDim() ? this->Rows() : this->Cols();
-    if (!split_data_dims) items_per_index_pos *= this->DataDims();
-    uint32_t items_per_pos = split_data_dims ? 1 : this->DataDims();
+    PosType items_per_index_pos = this->NonIndexDimSize();
+    if (!split_depths) items_per_index_pos *= this->Depths();
+    uint32_t elem_stride = split_depths ? 1 : this->Depths();
     IdxType data_idx = 0;
     const bool has_data = !this->type_.IsPattern();
-    const IdxType data_dim_stride = res.DataDimStride();
+    const IdxType depth_stride = res.DepthStride();
     for (PosType p = 0; p < index_.size() - 1; ++p) {
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        IdxType idx0 = p * items_per_index_pos + this->Pos(i) * items_per_pos;
-        for (uint32_t j = 0; j < this->DataDims(); ++j) {
-          IdxType idx = idx0 + j * data_dim_stride;
+        IdxType idx0 = p * items_per_index_pos + this->Pos(i) * elem_stride;
+        for (uint32_t j = 0; j < this->Depths(); ++j) {
+          IdxType idx = idx0 + j * depth_stride;
           res.Set(idx, has_data ? this->data_[data_idx++] : 1);
         }
       }
     }
-    DCHECK(!has_data || data_idx == nnz_ * this->DataDims());
+    DCHECK(!has_data || data_idx == nnz_ * this->Depths());
     return res;
   }
 
-  value_type operator()(PosType row, PosType col, uint32_t data_dim = 0) const {
+  value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
     PosType non_idx_pos;
     FlexPosIterator first, last;
     if (this->IndexDim() == 0) {
@@ -237,7 +248,7 @@ public:
     }
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
-      if (!this->type_.IsPattern()) return At(it - pos_(), data_dim);
+      if (!this->type_.IsPattern()) return At(it - pos_(), depth);
       return 1;
     } else
       return 0;
@@ -393,10 +404,7 @@ public:
   void push_back(const Entry &entry) {
     const auto & [pos, vars] = entry;
     auto family = this->Type().Family();
-    DCHECK(family == MatrixType::kBoolFamily ||
-           vars.size() == this->DataDims());
-    DCHECK_GE(pos[0], 0);
-    DCHECK_GE(pos[1], 0);
+    DCHECK(family == MatrixType::kBoolFamily || vars.size() == this->Depths());
     PosType index_pos = pos[this->IndexDim()];
     if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) return;
     while (index_pos_end_ != index_pos) {
@@ -451,7 +459,7 @@ public:
     this->type_ = mat.Type();
     this->shape_ = mat.Shape();
     this->order_ = mat.Order();
-    DCHECK_GT(this->DataDims(), 0);
+    DCHECK_GT(this->Depths(), 0);
     while (mat.HasNext()) push_back(mat.Next());
     index_.push_back(nnz_);
     return absl::OkStatus();
@@ -657,7 +665,7 @@ public:
           std::make_tuple(pos.size(), pos.ItemSize(), pos_file, data_file));
     }
     DCHECK_GE(pos_min, 0);
-    DCHECK_LT(pos_max, mat.IndexDim() ? mat.Rows() : mat.Cols());
+    DCHECK_LT(pos_max, mat.NonIndexDimSize());
     DCHECK_EQ(tmp_file_infos.size(), ranges.size());
 
     auto file_or = OpenWriteFile(path);
@@ -782,8 +790,8 @@ public:
   }
 
 protected:
-  value_type At(IdxType idx, uint32_t data_dim = 0) const {
-    idx = idx * this->DataDims() + data_dim;
+  value_type At(IdxType idx, uint32_t depth = 0) const {
+    idx = idx * this->Depths() + depth;
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
       DCHECK(this->data_mmap_.empty());
       return this->data_[idx];
@@ -877,7 +885,7 @@ protected:
   }
 
   FlexPosType CountNonIndexDimNnz() const {
-    PosType non_index_dim_size = this->IndexDim() ? this->Rows() : this->Cols();
+    PosType non_index_dim_size = this->NonIndexDimSize();
     FlexPosType pos(pos_.ItemSize(), non_index_dim_size);
     auto index_pos_end = this->IndexPosEnd();
     for (PosType p = 0; p < index_pos_end; ++p) {
@@ -892,7 +900,7 @@ protected:
     CHECK(!idx_shift_by_min_val) << "Not yet supported";
     FlexIdxType idx(idx_item_size);
     IdxType nnz = 0;
-    PosType new_index_dim_size = this->IndexDim() ? this->Rows() : this->Cols();
+    PosType new_index_dim_size = this->NonIndexDimSize();
     for (PosType p = 0; p < new_index_dim_size && nnz < nnz_; ++p) {
       idx.push_back(nnz);
       nnz += nbr[p];

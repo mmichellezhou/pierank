@@ -149,7 +149,7 @@ protected:
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
         DCHECK_LT(i, this->NumNonZeros()) << p;
         auto pos = this->Pos(i);
-        DCHECK_LT(pos, this->Rows());
+        DCHECK_LT(pos, this->NonIndexDimSize());
         DCHECK_LT(pos, old_score.size());
         DCHECK_GT(out_degree_[pos], 0);
         sum += old_score[pos];
