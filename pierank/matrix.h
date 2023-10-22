@@ -65,6 +65,8 @@ public:
 
   uint32_t Depths() const { return shape_.back(); }
 
+  // As depth dim is always the last one, it's same as # of non-depth dims.
+  // Thus, the following is always true: NonDepthDims() == DepthDim()
   uint32_t DepthDim() const { return shape_.size() - 1; }
 
   bool SplitDepths() const { return stride_.back() > 1; }
@@ -73,7 +75,9 @@ public:
 
   IdxType ElemStride() const { return SplitDepths() ? 1 : Depths(); }
 
-  uint32_t IndexDim() const { return order_.front(); }
+  uint32_t IndexDim() const { return order_[index_dim_order_]; }
+
+  uint32_t NonIndexDim() const { return order_[non_index_dim_order_]; }
 
   PosType MaxDimSize() const {
     return *std::max_element(shape_.begin(), shape_.end());
@@ -82,6 +86,8 @@ public:
   PosType IndexDimSize() const { return shape_[order_[0]]; }
 
   PosType NonIndexDimSize() const { return shape_[order_[1]]; }
+
+  bool IsLeaf() const { return index_dim_order_ + 3 == shape_.size(); }
 
   // Total number of elements (regardless of their values), where a single
   // element is a point with "depths" dimensions
@@ -127,6 +133,8 @@ protected:
   // {1, 0, 2} for column-major.
   // For SparseMatrix, depth dim is ALWAYS last in order_
   std::vector<uint32_t> order_;
+  uint32_t index_dim_order_ = 0;  // which elem of order_ is the index dim
+  uint32_t non_index_dim_order_ = 1;  // which elem of order_ is non-index dim
   // Stride for each dim, as determined by shape_ and order_
   std::vector<uint64_t> stride_;
   IdxType elems_ = 0;  // == shape_[0] * shape_[1]

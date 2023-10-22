@@ -21,6 +21,7 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "absl/types/span.h"
 
 #include "pierank/data_type.h"
 #include "pierank/flex_array.h"
@@ -127,6 +128,10 @@ public:
 
   using PosRanges = std::vector<PosRange>;
 
+  using PosSpan = absl::Span<const PosType>;
+
+  using PosSpanMutable = absl::Span<PosType>;
+
   // PosRanges for InitRanges, UpdateRanges, and SyncRanges
   using TriplePosRanges = std::array<PosRanges, 3>;
 
@@ -142,7 +147,7 @@ public:
 
   using DenseType = Matrix<PosType, IdxType, DataContainerType>;
 
-  using Entry = MatrixMarketIo::Entry;
+  using Var = MatrixMarketIo::Var;
 
   using DataFamily = MatrixType::DataFamily;
 
@@ -185,7 +190,7 @@ public:
         std::vector<MatrixMarketIo::Var> vars;
         for (uint32_t d = 0; d < depths; ++d)
           vars.push_back(dense(row, col, d));
-        push_back({{row, col}, vars});
+        push_back(row, col, vars);
       }
     }
     ++index_pos_end_;
@@ -232,26 +237,24 @@ public:
     return res;
   }
 
-  value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
-    PosType non_idx_pos;
-    FlexPosIterator first, last;
-    if (this->IndexDim() == 0) {
-      if (row + 1 >= index_.size()) return 0;
-      first = pos_(index_[row]);
-      last = pos_(index_[row + 1]);
-      non_idx_pos = col;
-    } else {
-      if (col + 1 >= index_.size()) return 0;
-      first = pos_(index_[col]);
-      last = pos_(index_[col + 1]);
-      non_idx_pos = row;
-    }
+  value_type operator()(PosSpan pos, uint32_t depth = 0) const {
+    PosType index_pos = pos[this->IndexDim()];
+    if (index_pos + 1 >= index_.size()) return 0;
+    FlexPosIterator first = pos_(index_[index_pos]);
+    FlexPosIterator last = pos_(index_[index_pos + 1]);
+    PosType non_idx_pos = pos[this->NonIndexDim()];
+
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
       if (!this->type_.IsPattern()) return At(it - pos_(), depth);
       return 1;
     } else
       return 0;
+  }
+
+  value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
+    DCHECK_EQ(this->shape_.size(), 3);
+    return (*this)({row, col}, depth);
   }
 
   const FlexIdxType &Index() const { return index_; }
@@ -325,7 +328,7 @@ public:
       this->shape_ = ReadUint64Vector(&is, &offset);
       this->order_ = ReadUint32Vector(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
-      CHECK_LT(this->IndexDim(), 2);
+      CHECK_LT(this->IndexDim(), this->DepthDim());
       if (!is)
         this->status_.Update(absl::InternalError("Error read PRM file header"));
     } else
@@ -401,19 +404,36 @@ public:
     if (this->data_mmap_.size()) this->data_mmap_.unmap();
   }
 
-  void push_back(const Entry &entry) {
-    const auto & [pos, vars] = entry;
+  void push_back(PosSpan pos, const std::vector<Var> vars,
+                 PosSpanMutable *zpos = nullptr) {
     auto family = this->Type().Family();
     DCHECK(family == MatrixType::kBoolFamily || vars.size() == this->Depths());
-    PosType index_pos = pos[this->IndexDim()];
+    std::unique_ptr<PosType[]> zposa = nullptr;
+    PosSpanMutable zposs;
+    if (!zpos && !this->IsLeaf()) {
+      zposa = std::make_unique<PosType[]>(pos.size());
+      zposs = PosSpanMutable(zposa.get(), pos.size());
+      zpos = &zposs;
+    }
     if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) return;
-    while (index_pos_end_ != index_pos) {
+    while (index_pos_end_ != pos[this->IndexDim()]) {
       index_.push_back(nnz_);
       ++index_pos_end_;
-      DCHECK_LE(index_pos_end_, index_pos);
+      DCHECK_LE(index_pos_end_, pos[this->IndexDim()]);
       DCHECK_EQ(index_[index_pos_end_], nnz_);
     }
-    pos_.push_back(this->IndexDim() ? pos[0] : pos[1]);
+    auto non_index_dim = this->NonIndexDim();
+    pos_.push_back(pos[non_index_dim]);
+    if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+      DCHECK(!this->IsLeaf()) << "Unexpected leaf matrix";
+      CHECK_LE(nnz_, std::numeric_limits<PosType>::max());
+      (*zpos)[non_index_dim] = static_cast<PosType>(nnz_);
+      this->data_.push_back(pos, vars, zpos);
+      return;
+    } else if (!this->IsLeaf()) {
+      CHECK(false) << "Unexpected non-leaf matrix";
+      return;
+    }
     for (const auto & var : vars) {
       if (family == MatrixType::kIntegerFamily) {
         if constexpr (std::is_integral_v<value_type>) {
@@ -422,7 +442,8 @@ public:
           DCHECK_GE(std::get<int64_t>(var),
                     std::numeric_limits<value_type>::lowest());
         }
-        this->data_.push_back(std::get<int64_t>(var));
+        if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>)
+          this->data_.push_back(std::get<int64_t>(var));
       } else if (family == MatrixType::kRealFamily) {
         if constexpr (std::is_floating_point_v<value_type>) {
           DCHECK_LE(std::get<double>(var),
@@ -430,7 +451,8 @@ public:
           DCHECK_GE(std::get<double>(var),
                     std::numeric_limits<value_type>::lowest());
         }
-        this->data_.push_back(std::get<double>(var));
+        if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>)
+          this->data_.push_back(std::get<double>(var));
       } else if (family == MatrixType::kComplexFamily) {
         if constexpr (std::is_same_v<value_type, std::complex<double>>) {
           for (const auto &var : vars)
@@ -448,6 +470,11 @@ public:
     nnz_++;
   }
 
+  void push_back(PosType row, PosType col, const std::vector<Var> vars) {
+    DCHECK_EQ(this->shape_.size(), 3);
+    push_back({row, col}, vars);
+  }
+
   absl::Status ReadMatrixMarketFile(const std::string &path) {
     DCHECK(this->data_mmap_.empty());
     MatrixMarketIo mat(path);
@@ -460,7 +487,16 @@ public:
     this->shape_ = mat.Shape();
     this->order_ = mat.Order();
     DCHECK_GT(this->Depths(), 0);
-    while (mat.HasNext()) push_back(mat.Next());
+    while (mat.HasNext()) {
+      const auto & [pos, vars] = mat.Next();
+      std::vector<PosType> posv;
+      for (const auto & p : pos) {
+        if (p > std::numeric_limits<PosType>::max())
+          return absl::InternalError(absl::StrCat("Pos too big: ", p));
+        posv.push_back(static_cast<PosType>(p));
+      }
+      push_back(posv, vars);
+    }
     index_.push_back(nnz_);
     return absl::OkStatus();
   }

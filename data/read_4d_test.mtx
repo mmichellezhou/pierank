@@ -1,4 +1,4 @@
-%%MatrixMarket matrix coordinate real general [shape:(5,5,4,2),order:(0,1,2,3)]
+%%MatrixMarket matrix coordinate real general [shape:(5,5,4,2);order:(0,1,2,3)]
 % MatrixMarket with PieRank extensions:
 % E1: It is a 4D tensor with shape (5, 5, 4, 2)
 % E2: The storage order is (0, 1, 2, 3), same as a multi-dimensional C array

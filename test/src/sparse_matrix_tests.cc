@@ -493,7 +493,7 @@ TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   EXPECT_EQ(mat, mat1);
 }
 
-TEST(SparseMatrixTests, ReadTensorMtxFile) {
+TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
   auto file_path = TestDataFilePath("real_4d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   using SubMat = SparseMatrix<uint32_t, uint64_t>;

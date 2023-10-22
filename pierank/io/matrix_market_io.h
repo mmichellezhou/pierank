@@ -358,13 +358,15 @@ public:
   bool HasNext() const { return count_ < nnz_; }
 
   Entry Next() {
-    std::vector<uint64_t> pos(2);
-    is_ >> pos[0] >> pos[1];
-    --pos[0];
-    --pos[1];
+    uint32_t depth_dim = DepthDim();
+    std::vector<uint64_t> pos(depth_dim);
+    for (std::size_t i = 0; i < depth_dim; ++i) {
+      is_ >> pos[i];
+      --pos[i];  // MatrixMarket position starts at 1 instead of 0
+    }
     std::vector<Var> vars;
-    uint32_t data_dims = DataDims();
-    while (data_dims--) {
+    uint32_t depths = Depths();
+    while (depths--) {
       if (type_.IsInteger()) {
         int64_t value;
         is_ >> value;
@@ -397,7 +399,11 @@ public:
 
   const std::vector<uint32_t>& Order() const { return order_; }
 
-  uint32_t DataDims() const { return shape_.back(); }
+  uint32_t Depths() const { return shape_.back(); }
+
+  // As depth dim is always the last one, it's same as # of non-depth dims.
+  // Thus, the following is always true: NonDepthDims() == DepthDim()
+  uint32_t DepthDim() const { return shape_.size() - 1; }
 
 private:
   MatrixType type_ = MatrixType::kUnknown;
