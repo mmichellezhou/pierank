@@ -165,10 +165,8 @@ public:
               : this->ReadPieRankMatrixFile(prm_file_path);
   }
 
-  SparseMatrix(const DenseType &dense) :
-      Matrix<PosType, IdxType, DataContainerType>(dense.Type(),
-                                                  dense.Shape(),
-                                                  dense.Order()) {
+  SparseMatrix(const DenseType &dense) {
+    Config(dense.Type(), dense.Shape(), dense.Order());
     if (dense.SplitDepths()) {
       // SparseMatrix can't split data dims, which thus must be last in order_
       auto it =
@@ -180,17 +178,17 @@ public:
     const uint32_t depths = dense.Depths();
     const uint64_t elem_stride = dense.ElemStride();
     for (IdxType i = 0; i < dense.Elems(); ++i) {
-      auto && [row, col, depth] = dense.IdxToPos(i * elem_stride);
+      auto && [pos, depth] = dense.IdxToPosAndDepth(i * elem_stride);
       DCHECK_EQ(depth, 0);
       bool all_zeros = true;
       for (uint32_t d = 0; d < depths && all_zeros; ++d) {
-        if (dense(row, col, d) != 0) all_zeros = false;
+        if (dense(pos, d) != 0) all_zeros = false;
       }
       if (!all_zeros) {
         std::vector<MatrixMarketIo::Var> vars;
         for (uint32_t d = 0; d < depths; ++d)
-          vars.push_back(dense(row, col, d));
-        push_back(row, col, vars);
+          vars.push_back(dense(pos, d));
+        push_back(pos, vars);
       }
     }
     ++index_pos_end_;

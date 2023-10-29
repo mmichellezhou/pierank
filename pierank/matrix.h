@@ -84,13 +84,17 @@ public:
   // element is a point with "depths" dimensions
   IdxType Elems() const { return elems_; }
 
-  std::tuple<PosType, PosType, PosType> IdxToPos(IdxType idx) const {
-    std::vector<PosType> pos(order_.size());
+  std::pair<std::vector<PosType>, uint32_t> IdxToPosAndDepth(IdxType idx) const {
+    std::vector<PosType> pos(order_.size() - 1);
+    uint32_t depth;
     for (auto it = order_.begin(); it != order_.end(); ++it) {
-      pos[*it] = idx / stride_[*it];
+      if (*it < DepthDim())
+        pos[*it] = idx / stride_[*it];
+       else
+         depth = static_cast<uint32_t>(idx / stride_[*it]); 
       idx %= stride_[*it];
     }
-    return std::make_tuple(pos[0], pos[1], pos[2]);
+    return std::make_pair(pos, depth);
   }
 
   void InitData() {

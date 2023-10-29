@@ -49,12 +49,12 @@ CheckDenseMatrix(const M &mat,
       EXPECT_EQ(mat(pos, d), values[d]);
   }
 
-  for (uint32_t i = 0; i < mat.Rows(); ++i) {
-    for (uint32_t j = 0; j < mat.Cols(); ++j) {      
-      if (checked.find({i, j}) != checked.end()) continue;
-      for (size_t d = 0; d < depths; ++d)
-        EXPECT_EQ(mat(i, j, d), 0);
-    }
+  const uint64_t elem_stride = mat.ElemStride();
+  for (uint64_t i = 0; i < mat.Elems(); ++i) {
+    auto && [pos, depth] = mat.IdxToPosAndDepth(i * elem_stride);
+    if (checked.find(pos) != checked.end()) continue;
+    for (size_t d = 0; d < depths; ++d)
+      EXPECT_EQ(mat(pos, d), 0);
   }
 }
 
