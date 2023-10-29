@@ -26,23 +26,11 @@ public:
 
   Matrix() = default;
 
-  Matrix(MatrixType type, const std::vector<uint64_t> &shape,
-         const std::vector<uint32_t> &order) :
-      type_(type), shape_(shape), order_(order) {
-    CHECK_EQ(shape.size(), order.size());
-
-    elems_ = 1;
-    for (std::size_t i = 0; i < shape.size() - 1; ++i)
-      elems_ *= shape[i];
-    CHECK_LE(elems_, std::numeric_limits<IdxType>::max());
-
-    stride_.resize(order.size(), 1);
-    uint64_t size = 1;
-    for (auto it = order.rbegin(); it != order.rend(); ++it) {
-      stride_[*it] = size;
-      size *= shape[*it];
-    }
-
+  Matrix(MatrixType type, 
+         const std::vector<uint64_t> &shape,
+         const std::vector<uint32_t> &order,
+         uint32_t index_dim_order = 0) {
+    Config(type, shape, order, index_dim_order);
   }
 
   Matrix(const Matrix &) = delete;
@@ -123,6 +111,30 @@ public:
   absl::Status status() const { return status_; }
 
 protected:
+  virtual void Config(MatrixType type, 
+                      const std::vector<uint64_t> &shape,
+                      const std::vector<uint32_t> &order,
+                      uint32_t index_dim_order = 0) {
+    CHECK_EQ(shape.size(), order.size());
+    type_ = type;
+    shape_ = shape;
+    order_ = order;    
+    index_dim_order_ = index_dim_order;
+    non_index_dim_order_ = index_dim_order + 1;
+
+    elems_ = 1;
+    for (std::size_t i = 0; i < shape.size() - 1; ++i)
+      elems_ *= shape[i];
+    CHECK_LE(elems_, std::numeric_limits<IdxType>::max());
+
+    stride_.resize(order.size(), 1);
+    uint64_t size = 1;
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+      stride_[*it] = size;
+      size *= shape[*it];
+    }
+  }
+
   absl::Status status_;
   MatrixType type_ = MatrixType::kUnknown;
   // Size of each dim, including sub-matrix in data_, where the last dim

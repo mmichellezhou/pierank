@@ -13,7 +13,7 @@
 namespace pierank {
 
 inline std::string TestDataFilePath(absl::string_view file_name) {
-  std::vector<absl::string_view> path = { "..", "..", "data"};
+  std::vector<absl::string_view> path = {"..", "..", "data"};
   path.push_back(file_name);
   return absl::StrJoin(path, kPathSeparator);
 }

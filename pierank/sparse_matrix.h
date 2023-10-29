@@ -205,6 +205,16 @@ public:
 
   SparseMatrix &operator=(SparseMatrix &&) = default;
 
+  void Config(MatrixType type, 
+              const std::vector<uint64_t> &shape,
+              const std::vector<uint32_t> &order,
+              uint32_t index_dim_order = 0) override {
+    Matrix<PosType, IdxType, DataContainerType>::Config(type, shape, order,
+                                                        index_dim_order);
+    if constexpr (is_specialization_v<DataContainerType, SparseMatrix>)
+      this->data_.Config(type, shape, order, index_dim_order + 1);
+  }
+
   inline static constexpr DataType StaticDataType() {
     if constexpr (is_specialization_v<DataContainerType, FlexArray>)
       return DataType::kFlex;
@@ -416,10 +426,12 @@ public:
       zpos = &zposs;
     }
     if (!vars.empty() && MatrixMarketIo::AreVarsZero(vars)) return;
-    while (index_pos_end_ != pos[this->IndexDim()]) {
+    PosType index_pos = this->index_dim_order_ == 0 ? pos[this->IndexDim()]
+                                                    : (*zpos)[this->IndexDim()];
+    while (index_pos_end_ != index_pos) {
       index_.push_back(nnz_);
       ++index_pos_end_;
-      DCHECK_LE(index_pos_end_, pos[this->IndexDim()]);
+      DCHECK_LE(index_pos_end_, index_pos);
       DCHECK_EQ(index_[index_pos_end_], nnz_);
     }
     auto non_index_dim = this->NonIndexDim();
@@ -429,6 +441,7 @@ public:
       CHECK_LE(nnz_, std::numeric_limits<PosType>::max());
       (*zpos)[non_index_dim] = static_cast<PosType>(nnz_);
       this->data_.push_back(pos, vars, zpos);
+      ++nnz_;
       return;
     } else if (!this->IsLeaf()) {
       CHECK(false) << "Unexpected non-leaf matrix";
@@ -467,7 +480,7 @@ public:
           CHECK(false) << "Complex matrix must have floating point data type";
       }
     }
-    nnz_++;
+    ++nnz_;
   }
 
   void push_back(PosType row, PosType col, const std::vector<Var> vars) {
@@ -480,12 +493,10 @@ public:
     MatrixMarketIo mat(path);
     if (!mat.ok()) {
       this->status_ =
-          absl::InternalError(absl::StrCat("Fail to open file: ", path));
+          absl::InternalError(absl::StrCat("Fail to read file: ", path));
       return this->status_;
     }
-    this->type_ = mat.Type();
-    this->shape_ = mat.Shape();
-    this->order_ = mat.Order();
+    Config(mat.Type(), mat.Shape(), mat.Order());
     DCHECK_GT(this->Depths(), 0);
     while (mat.HasNext()) {
       const auto & [pos, vars] = mat.Next();

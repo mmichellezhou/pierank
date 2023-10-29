@@ -498,5 +498,5 @@ TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   using SubMat = SparseMatrix<uint32_t, uint64_t>;
   SparseMatrix<uint32_t, uint64_t, SubMat> mat;
-  // EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
 }
