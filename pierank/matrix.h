@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/types/span.h"
 
 #include "pierank/data_type.h"
 #include "pierank/flex_array.h"
@@ -22,6 +23,8 @@ template<typename PosType, typename IdxType,
     typename DataContainerType = std::vector<double>>
 class Matrix {
 public:
+  using PosSpan = absl::Span<const PosType>;
+
   using value_type = typename DataContainerType::value_type;
 
   Matrix() = default;
@@ -101,9 +104,17 @@ public:
     data_[idx] = val;
   }
 
-  value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
-    uint64_t idx = row * stride_[0] + col * stride_[1] + depth * stride_[2];
+  value_type operator()(PosSpan pos, uint32_t depth = 0) const {
+    DCHECK_EQ(pos.size() + 1, stride_.size());
+    uint64_t idx = 0;    
+    for (size_t i = 0; i < pos.size(); ++i)
+      idx += pos[i] * stride_[i];      
+    idx += depth * stride_.back();    
     return data_[idx];
+  }
+
+  value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
+    return (*this)({row, col}, depth);    
   }
 
   bool ok() const { return status_.ok(); }

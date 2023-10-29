@@ -3,6 +3,7 @@
 //
 
 #include <set>
+#include <vector>
 
 #include "absl/strings/str_replace.h"
 #include "gtest/gtest.h"
@@ -16,43 +17,40 @@ using namespace pierank;
 
 static constexpr bool kGeneratePieRankMatrixFile = false;
 
-using Pos2d = pair<uint32_t, uint32_t>;
+template<typename M, typename V>
+void CheckSparseMatrix(const M &mat,
+                       const vector<pair<vector<uint32_t>, V>> &entries) {
+  for (auto && [pos, value] : entries)
+    EXPECT_EQ(mat(pos), value);
+}
 
 template<typename M, typename V>
-void CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, V>> &entries) {
-  for (auto && [pos2d, value] : entries) {
-    auto && [row, col] = pos2d;
-    EXPECT_EQ(mat(row, col), value);
+void
+CheckSparseMatrix(const M &mat,
+                  const vector<pair<vector<uint32_t>, vector<V>>> &entries) {
+  uint32_t depths = mat.Depths();
+  for (auto && [pos, values] : entries) {
+    EXPECT_EQ(values.size(), depths);
+    for (size_t d = 0; d < values.size(); ++d)
+      EXPECT_EQ(mat(pos, d), values[d]);
   }
 }
 
 template<typename M, typename V>
 void
-CheckSparseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
+CheckDenseMatrix(const M &mat,
+                 const vector<pair<vector<uint32_t>, vector<V>>> &entries) {
+  set<vector<uint32_t>> checked;
   uint32_t depths = mat.Depths();
-  for (auto && [pos2d, values] : entries) {
+  for (auto && [pos, values] : entries) {
     EXPECT_EQ(values.size(), depths);
-    auto && [row, col] = pos2d;
+    checked.insert(pos);
     for (size_t d = 0; d < values.size(); ++d)
-      EXPECT_EQ(mat(row, col, d), values[d]);
-  }
-}
-
-template<typename M, typename V>
-void
-CheckDenseMatrix(const M &mat, const vector<pair<Pos2d, vector<V>>> &entries) {
-  set<Pos2d> checked;
-  uint32_t depths = mat.Depths();
-  for (auto && [pos2d, values] : entries) {
-    EXPECT_EQ(values.size(), depths);
-    auto && [row, col] = pos2d;
-    checked.insert({row, col});
-    for (size_t d = 0; d < values.size(); ++d)
-      EXPECT_EQ(mat(row, col, d), values[d]);
+      EXPECT_EQ(mat(pos, d), values[d]);
   }
 
-  for (int i = 0; i < mat.Rows(); ++i) {
-    for (int j = 0; j < mat.Cols(); ++j) {
+  for (uint32_t i = 0; i < mat.Rows(); ++i) {
+    for (uint32_t j = 0; j < mat.Cols(); ++j) {      
       if (checked.find({i, j}) != checked.end()) continue;
       for (size_t d = 0; d < depths; ++d)
         EXPECT_EQ(mat(i, j, d), 0);
@@ -114,7 +112,6 @@ auto Transpose(const SparseMatrix <uint32_t, uint64_t> &mat) {
   auto mat_inverse_or = mat.ChangeIndexDim(pool, kMaxNnzPerRange);
   EXPECT_OK(mat_inverse_or);
   return std::move(mat_inverse_or).value();
-
 }
 
 TEST(SparseMatrixTests, ReadAsh219MtxFile) {
@@ -197,7 +194,7 @@ INSTANTIATE_TEST_SUITE_P(SparseMatrixTests, PieRankMatrixTestFixture,
                       TestDataFilePath("ash219.i1.prm"))
 );
 
-vector<pair<Pos2d, double>> B1ssMatrixTestEntries() {
+vector<pair<vector<uint32_t>, double>> B1ssMatrixTestEntries() {
   return { {{0, 0}, 0}, {{4, 0}, -0.03599942}, {{5, 0}, -0.0176371},
            {{6, 0}, -0.007721779}, {{0, 1}, 1}, {{1, 1}, -1}, {{6, 6}, 1} };
 }
@@ -218,7 +215,7 @@ TEST(SparseMatrixTests, ReadB1ssMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, double>> Bcsstm01MatrixTestEntries() {
+vector<pair<vector<uint32_t>, double>> Bcsstm01MatrixTestEntries() {
   return { {{0, 1}, 0}, {{0, 0}, 100}, {{10, 10}, 0}, {{25, 25}, 200},
            {{32, 32}, 200}, {{41, 41}, 0}, {{42, 42}, 200}, {{47, 47}, 0} };
 }
@@ -239,7 +236,7 @@ TEST(SparseMatrixTests, ReadBcsstm01MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, double>> Bcsstm02MatrixTestEntries() {
+vector<pair<vector<uint32_t>, double>> Bcsstm02MatrixTestEntries() {
   return { {{0, 1}, 0}, {{0, 0}, 0.09213858051}, {{3, 3}, 0.137995737983},
            {{9, 9}, 0.09213858051}, {{12, 12}, 0.172828573455},
            {{15, 15}, 0.0852383576022}, {{22, 22}, 0.172828573455},
@@ -262,7 +259,7 @@ TEST(SparseMatrixTests, ReadBcsstm02MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, double>> Can24MatrixTestEntries() {
+vector<pair<vector<uint32_t>, double>> Can24MatrixTestEntries() {
   return { {{1, 0}, 0}, {{0, 0}, 1}, {{6, 0}, 1}, {{10, 0}, 0},
            {{100, 0}, 0}, {{17, 1}, 1}, {{22, 2}, 1}, {{22, 3}, 0},
            {{23, 3}, 0}, {{3, 3}, 1}, {{18, 3}, 1}, {{22, 22}, 1},
@@ -285,7 +282,7 @@ TEST(SparseMatrixTests, ReadCan24MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, complex<double>>> Dwg961aMatrixTestEntries() {
+vector<pair<vector<uint32_t>, complex<double>>> Dwg961aMatrixTestEntries() {
   return { {{0, 1}, {0.0}}, {{0, 0}, {-49.1537, 4797.68}},
            {{1, 0}, {-24.0559, 992.499}}, {{4, 1}, {-24.0559, 992.5}},
            {{62, 3}, {-12.5474, 1902.7}}, {{8, 7}, {-24.0572, 992.373}},
@@ -315,7 +312,7 @@ TEST(SparseMatrixTests, ReadDwg961aMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, double>> FarmMatrixTestEntries() {
+vector<pair<vector<uint32_t>, double>> FarmMatrixTestEntries() {
   return { {{3, 3}, 0}, {{0, 0}, 1}, {{1, 1}, 1}, {{1, 5}, 1}, {{2, 5}, 20},
            {{3, 6}, 40}, {{0, 11}, 250}, {{0, 14}, 125}, {{3, 14}, 10},
            {{2, 15}, 1}, {{3, 16}, 1}, {{4, 16}, 0} };
@@ -356,7 +353,7 @@ TEST(SparseMatrixTests, ReadFarmMtxFileFlex) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, complex<float>>> Mhd1280bMatrixTestEntries() {
+vector<pair<vector<uint32_t>, complex<float>>> Mhd1280bMatrixTestEntries() {
   return { {{0, 1}, {0.0f}}, {{0, 0}, {2.0f, 0.0f}},
            {{1, 1}, {0.252505826f, 0.0f}},
            {{3, 1}, {0.000144380768f, -1.11464849e-18f}},
@@ -386,7 +383,7 @@ TEST(SparseMatrixTests, ReadMhd1280bMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, float>> Plskz362MatrixTestEntries() {
+vector<pair<vector<uint32_t>, float>> Plskz362MatrixTestEntries() {
   return { {{0, 0}, 0}, {{130, 0}, 0.1789438674667032f},
            {{246, 0}, 0.18205396002412488f},
            {{130, 1}, -0.1789438674667032f},
@@ -420,7 +417,7 @@ TEST(SparseMatrixTests, ReadPlskz362MtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, complex<double>>> Young2cMatrixTestEntries() {
+vector<pair<vector<uint32_t>, complex<double>>> Young2cMatrixTestEntries() {
   return { {{841, 0}, {0.0}}, {{0, 841}, {0.0}}, {{2, 0}, {0.0}},
            {{0, 0}, {-218.46, 0.0}}, {{1, 0}, {64.0, 0.0}},
            {{29, 0}, {64.0, 0.0}}, {{35, 6}, {64.0, 0.0}},
@@ -449,7 +446,7 @@ TEST(SparseMatrixTests, ReadYoung2cMtxFile) {
   EXPECT_EQ(mat, mat0);
 }
 
-vector<pair<Pos2d, vector<double>>> Real3dTestMatrixTestEntries() {
+vector<pair<vector<uint32_t>, vector<double>>> Real3dTestMatrixTestEntries() {
   return { {{0, 0}, {0, 0}},
            {{2, 0}, {3.11, 3.12}}, {{4, 0}, {5.11, 5.12}},
            {{0, 1}, {1.21, 1.22}}, {{2, 1}, {3.21, 3.22}},
