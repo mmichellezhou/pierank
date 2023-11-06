@@ -476,6 +476,7 @@ TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseMatrix<uint32_t, uint64_t> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Real3dTestMatrixTestEntries());
 
   auto dense = mat.ToDense(/*split_depths=*/false);
   CheckDenseMatrix(dense, Real3dTestMatrixTestEntries());
@@ -490,10 +491,36 @@ TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   EXPECT_EQ(mat, mat1);
 }
 
+vector<pair<vector<uint32_t>, vector<double>>> Real4dTestMatrixTestEntries() {
+  return { {{0, 0, 0}, {0, 0}},
+           {{0, 1, 0}, {1.211, 1.212}}, {{0, 1, 2}, {1.231, 1.232}},
+           {{0, 2, 1}, {1.321, 1.322}}, {{0, 2, 2}, {1.331, 1.332}},
+           {{0, 2, 3}, {1.341, 1.342}}, {{1, 3, 2}, {2.431, 2.432}},
+           {{2, 0, 1}, {3.121, 3.122}}, {{2, 1, 0}, {3.211, 3.212}},
+           {{2, 1, 3}, {3.241, 3.242}}, {{2, 3, 0}, {3.411, 3.412}},
+           {{2, 3, 3}, {3.441, 3.442}}, {{2, 4, 1}, {3.521, 3.522}},
+           {{2, 4, 3}, {3.541, 3.542}}, {{4, 0, 0}, {5.111, 5.112}},
+           {{4, 0, 3}, {5.141, 5.142}}};
+}
+
 TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
   auto file_path = TestDataFilePath("real_4d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   using SubMat = SparseMatrix<uint32_t, uint64_t>;
   SparseMatrix<uint32_t, uint64_t, SubMat> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Real4dTestMatrixTestEntries());
+
+  // std::cout << mat.NonZeroPosDebugString();
+  auto dense = mat.ToDense(/*split_depths=*/false);
+  CheckDenseMatrix(dense, Real4dTestMatrixTestEntries());
+
+  // SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
+  // EXPECT_EQ(mat, mat0);
+
+  dense = mat.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(dense, Real4dTestMatrixTestEntries());
+
+  // SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
+  // EXPECT_EQ(mat, mat1);
 }

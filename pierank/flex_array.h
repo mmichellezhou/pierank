@@ -66,8 +66,7 @@ public:
     Iterator(const Iterator &rhs) = default;
 
     Iterator(const FlexArray<T> &index, uint64_t idx) :
-        index_(&index), idx_(idx),
-        ptr_(index_->Data() + idx * index_->item_size_) {}
+        index_(&index), idx_(idx) {}
 
     inline value_type operator*() const { return (*index_)[idx_]; }
 
@@ -80,7 +79,6 @@ public:
 
     inline Iterator &operator++() {
       ++idx_;
-      ptr_ += index_->item_size_;
       return *this;
     }
 
@@ -92,7 +90,6 @@ public:
 
     inline Iterator &operator+=(difference_type rhs) {
       idx_ += rhs;
-      ptr_ += rhs * index_->item_size_;
       return *this;
     }
 
@@ -106,7 +103,6 @@ public:
 
     inline Iterator &operator--() {
       --idx_;
-      ptr_ -= index_->item_size_;
       return *this;
     }
 
@@ -118,7 +114,6 @@ public:
 
     inline Iterator& operator-=(difference_type rhs) {
       idx_ -= rhs;
-      ptr_ -= rhs * index_->item_size_;
       return *this;
     }
 
@@ -167,7 +162,6 @@ public:
   private:
     const FlexArray<T> *index_ = nullptr;
     difference_type idx_ = 0;
-    const char *ptr_ = nullptr;
   };
 
   Iterator begin() const { return Iterator(*this, /*idx=*/0); }

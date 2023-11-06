@@ -145,14 +145,19 @@ public:
 
   using value_type = typename DataContainerType::value_type;
 
-  using DenseType = Matrix<PosType, IdxType, DataContainerType>;
+  using DenseDataType = typename std::conditional<
+    is_specialization_v<DataContainerType, SparseMatrix>,
+    std::vector<value_type>,
+    DataContainerType>::type;
+
+  using DenseType = typename std::conditional<
+    is_specialization_v<DataContainerType, SparseMatrix>,
+    Matrix<PosType, IdxType, DenseDataType>,
+    Matrix<PosType, IdxType, DataContainerType>>::type;
 
   using Var = MatrixMarketIo::Var;
 
   using DataFamily = MatrixType::DataFamily;
-
-  using UniquePtr =
-      std::unique_ptr<SparseMatrix<PosType, IdxType, DataContainerType>>;
 
   using RangeFunc = void (SparseMatrix<PosType, IdxType>::*)(
       const PosRanges &ranges, uint32_t range_id);
@@ -169,8 +174,8 @@ public:
     Config(dense.Type(), dense.Shape(), dense.Order());
     if (dense.SplitDepths()) {
       // SparseMatrix can't split data dims, which thus must be last in order_
-      auto it =
-          std::find(this->order_.begin(), this->order_.end(), this->DepthDim());
+      auto it = std::find(this->order_.begin(), this->order_.end(),
+                          this->NonDepthDims());
       CHECK(it != this->order_.end());
       std::rotate(it, it + 1, this->order_.end());
     }
@@ -192,7 +197,7 @@ public:
       }
     }
     ++index_pos_end_;
-    index_.push_back(nnz_);
+    MarkEndofMatrix();
   }
 
   SparseMatrix(const SparseMatrix &) = delete;
@@ -219,34 +224,122 @@ public:
     return DataType::FromValueType<value_type>();
   }
 
-  DenseType ToDense(bool split_depths = false) const {
-    std::vector<uint64_t> shape = this->Shape();
-    std::vector<uint32_t> order = this->Order();
-    if (split_depths)
-      std::rotate(order.begin(), order.begin() + this->DepthDim(), order.end());
-    DenseType res(this->type_, shape, order);
-    res.InitData();
-    PosType items_per_index_pos = this->NonIndexDimSize();
-    if (!split_depths) items_per_index_pos *= this->Depths();
-    uint32_t elem_stride = split_depths ? 1 : this->Depths();
-    IdxType data_idx = 0;
-    const bool has_data = !this->type_.IsPattern();
-    const IdxType depth_stride = res.DepthStride();
+  // Returns true if all non-zeros are processed; otherwise false.
+  bool ForAllNonZeros(std::function<bool(PosSpan)> func,
+                      PosSpanMutable *pos = nullptr,
+                      PosSpanMutable *zpos = nullptr) const {
+    std::unique_ptr<PosType[]> posa = nullptr;
+    PosSpanMutable poss;
+    if (!pos) {
+      posa = std::make_unique<PosType[]>(this->NonDepthDims());
+      poss = PosSpanMutable(posa.get(), this->NonDepthDims());
+      pos = &poss;
+    }
+
+    std::unique_ptr<PosType[]> zposa = nullptr;
+    PosSpanMutable zposs;
+    if (!zpos && !this->IsLeaf()) {
+      zposa = std::make_unique<PosType[]>(this->NonDepthDims());
+      zposs = PosSpanMutable(zposa.get(), this->NonDepthDims());
+      zpos = &zposs;
+    }
+
+    uint32_t index_dim = this->IndexDim();
+    uint32_t non_index_dim = this->NonIndexDim();
+    PosSpanMutable mpos = this->index_dim_order_ == 0 ? *pos : *zpos;
     for (PosType p = 0; p < index_.size() - 1; ++p) {
+      mpos[index_dim] = p;
       for (IdxType i = this->Index(p); i < this->Index(p + 1); ++i) {
-        IdxType idx0 = p * items_per_index_pos + this->Pos(i) * elem_stride;
-        for (uint32_t j = 0; j < this->Depths(); ++j) {
-          IdxType idx = idx0 + j * depth_stride;
-          res.Set(idx, has_data ? this->data_[data_idx++] : 1);
+        (*pos)[non_index_dim] = this->Pos(i);
+        if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+          DCHECK_LE(i, std::numeric_limits<PosType>::max());
+          (*zpos)[non_index_dim] = static_cast<PosType>(i);
+          if (!this->data_.ForNonZerosAtIndexPos(func, *pos, zpos))
+            return false;
+        } else {
+          DCHECK(this->IsLeaf());
+          if (!func(mpos)) return false;
         }
       }
     }
-    DCHECK(!has_data || data_idx == nnz_ * this->Depths());
+    return true;
+  }
+
+  // Returns true if all non-zeros for an index pos are processed; else false.
+  bool ForNonZerosAtIndexPos(std::function<bool(PosSpan)> func,
+                             PosSpanMutable pos,
+                             PosSpanMutable *zpos = nullptr) const {
+    std::unique_ptr<PosType[]> zposa = nullptr;
+    PosSpanMutable zposs;
+    if (!zpos && !this->IsLeaf()) {
+      zposa = std::make_unique<PosType[]>(this->NonDepthDims());
+      zposs = PosSpanMutable(zposa.get(), this->NonDepthDims());
+      zpos = &zposs;
+    }
+
+    uint32_t idx_dim = this->IndexDim();
+    uint32_t non_idx_dim = this->NonIndexDim();
+    PosType idx_pos = this->index_dim_order_ == 0 ? pos[idx_dim]
+                                                  : (*zpos)[idx_dim];
+    for (IdxType i = this->Index(idx_pos); i < this->Index(idx_pos + 1); ++i) {
+      pos[non_idx_dim] = this->Pos(i);
+      if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+        DCHECK_LE(i, std::numeric_limits<PosType>::max());
+        zpos[non_idx_dim] = static_cast<PosType>(i);
+        if (!this->data_.ForNonZerosAtIndexPos(func, pos, zpos)) return false;
+      } else {
+        DCHECK(this->IsLeaf());
+        if (!func(pos)) return false;
+      }
+    }
+    return true;
+  }
+
+  std::string NonZeroPosDebugString() const {
+    std::string res;
+    this->ForAllNonZeros([this, &res](PosSpan pos) {
+      for (const auto p : pos)
+        absl::StrAppend(&res, " ", p);
+      absl::StrAppend(&res, "\n");
+      return true;
+    });
     return res;
   }
 
-  value_type operator()(PosSpan pos, uint32_t depth = 0) const {
-    PosType index_pos = pos[this->IndexDim()];
+  DenseType ToDense(bool split_depths = false) const {
+    std::vector<uint64_t> shape = this->Shape();
+    std::vector<uint32_t> order = this->Order();
+    if (split_depths) {
+      std::rotate(order.begin(), order.begin() + this->NonDepthDims(),
+                  order.end());
+    }
+    DenseType res(this->type_, shape, order);
+    res.InitData();
+    IdxType data_idx = 0;
+    const bool has_data = !this->type_.IsPattern();
+    this->ForAllNonZeros([=, &res, &data_idx](PosSpan pos) {
+      for (uint32_t d = 0; d < this->Depths(); ++d)
+        res.Set(has_data ? this->data_[data_idx++] : 1, pos, d);
+      return true;
+    });
+    DCHECK(!has_data || data_idx >= nnz_ * this->Depths());
+    return res;
+  }
+
+  value_type operator[](std::size_t idx) const { return this->data_[idx]; }
+
+  value_type operator()(PosSpan pos, uint32_t depth = 0,
+                        PosSpanMutable *zpos = nullptr) const {
+    std::unique_ptr<PosType[]> zposa = nullptr;
+    PosSpanMutable zposs;
+    if (!zpos && !this->IsLeaf()) {
+      zposa = std::make_unique<PosType[]>(pos.size());
+      zposs = PosSpanMutable(zposa.get(), pos.size());
+      zpos = &zposs;
+    }
+
+    PosType index_pos = this->index_dim_order_ == 0 ? pos[this->IndexDim()]
+                                                    : (*zpos)[this->IndexDim()];
     if (index_pos + 1 >= index_.size()) return 0;
     FlexPosIterator first = pos_(index_[index_pos]);
     FlexPosIterator last = pos_(index_[index_pos + 1]);
@@ -254,8 +347,13 @@ public:
 
     auto it = std::lower_bound(first, last, non_idx_pos);
     if (it != last && *it == non_idx_pos) {
-      if (!this->type_.IsPattern()) return At(it - pos_(), depth);
-      return 1;
+      if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+        (*zpos)[this->NonIndexDim()] = it - pos_();
+        return this->data_(pos, depth, zpos);
+      } else if (!this->type_.IsPattern())
+        return At(it - pos_(), depth);
+      else
+        return 1;
     } else
       return 0;
   }
@@ -336,7 +434,7 @@ public:
       this->shape_ = ReadUint64Vector(&is, &offset);
       this->order_ = ReadUint32Vector(&is, &offset);
       nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
-      CHECK_LT(this->IndexDim(), this->DepthDim());
+      CHECK_LT(this->IndexDim(), this->NonDepthDims());
       if (!is)
         this->status_.Update(absl::InternalError("Error read PRM file header"));
     } else
@@ -414,6 +512,8 @@ public:
 
   void push_back(PosSpan pos, const std::vector<Var> vars,
                  PosSpanMutable *zpos = nullptr) {
+    static PosType last_non_index_pos = std::numeric_limits<PosType>::max();
+
     auto family = this->Type().Family();
     DCHECK(family == MatrixType::kBoolFamily || vars.size() == this->Depths());
     std::unique_ptr<PosType[]> zposa = nullptr;
@@ -429,22 +529,31 @@ public:
     while (index_pos_end_ != index_pos) {
       index_.push_back(nnz_);
       ++index_pos_end_;
+      last_non_index_pos = std::numeric_limits<PosType>::max();
       DCHECK_LE(index_pos_end_, index_pos);
       DCHECK_EQ(index_[index_pos_end_], nnz_);
     }
-    auto non_index_dim = this->NonIndexDim();
-    pos_.push_back(pos[non_index_dim]);
+    const auto non_index_dim = this->NonIndexDim();
+    const auto non_index_pos = pos[non_index_dim];
+    bool new_pos = last_non_index_pos == std::numeric_limits<PosType>::max();
+    if (!new_pos) {
+      CHECK_LE(last_non_index_pos, non_index_pos) << "Unsorted element";
+      new_pos = last_non_index_pos != non_index_pos;
+    }
+    last_non_index_pos = non_index_pos;
+    if (new_pos) pos_.push_back(non_index_pos);
     if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
       DCHECK(!this->IsLeaf()) << "Unexpected leaf matrix";
       CHECK_LE(nnz_, std::numeric_limits<PosType>::max());
-      (*zpos)[non_index_dim] = static_cast<PosType>(nnz_);
+      (*zpos)[non_index_dim] = static_cast<PosType>(new_pos ? nnz_ : nnz_ - 1);
       this->data_.push_back(pos, vars, zpos);
-      ++nnz_;
+      if (new_pos) ++nnz_;
       return;
     } else if (!this->IsLeaf()) {
       CHECK(false) << "Unexpected non-leaf matrix";
       return;
     }
+    CHECK(new_pos) << "Duplicate element found in leaf matrix";
     for (const auto & var : vars) {
       if (family == MatrixType::kIntegerFamily) {
         if constexpr (std::is_integral_v<value_type>) {
@@ -486,6 +595,12 @@ public:
     push_back({row, col}, vars);
   }
 
+  void MarkEndofMatrix() {
+    index_.push_back(nnz_);
+    if constexpr (is_specialization_v<DataContainerType, SparseMatrix>)
+      this->data_.MarkEndofMatrix();
+  }
+
   absl::Status ReadMatrixMarketFile(const std::string &path) {
     DCHECK(this->data_mmap_.empty());
     MatrixMarketIo mat(path);
@@ -506,7 +621,7 @@ public:
       }
       push_back(posv, vars);
     }
-    index_.push_back(nnz_);
+    MarkEndofMatrix();
     return absl::OkStatus();
   }
 

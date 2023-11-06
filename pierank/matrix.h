@@ -56,9 +56,10 @@ public:
 
   uint32_t Depths() const { return shape_.back(); }
 
-  // As depth dim is always the last one, it's same as # of non-depth dims.
-  // Thus, the following is always true: NonDepthDims() == DepthDim()
-  uint32_t DepthDim() const { return shape_.size() - 1; }
+  // Returns the # of non-depth dimensions.
+  // Since depth dim is always the last one in SparseMatrix, it's same as
+  // # of non-depth dims.
+  uint32_t NonDepthDims() const { return shape_.size() - 1; }
 
   bool SplitDepths() const { return stride_.back() > 1; }
 
@@ -88,33 +89,38 @@ public:
     std::vector<PosType> pos(order_.size() - 1);
     uint32_t depth;
     for (auto it = order_.begin(); it != order_.end(); ++it) {
-      if (*it < DepthDim())
+      if (*it < NonDepthDims())
         pos[*it] = idx / stride_[*it];
-       else
-         depth = static_cast<uint32_t>(idx / stride_[*it]); 
+      else
+        depth = static_cast<uint32_t>(idx / stride_[*it]);
       idx %= stride_[*it];
     }
     return std::make_pair(pos, depth);
   }
 
   void InitData() {
-    data_.clear();
-    data_.resize(elems_ * Depths());
+    if constexpr (is_specialization_v<DataContainerType, FlexArray> ||
+                  is_specialization_v<DataContainerType, std::vector>) {
+      data_.clear();
+      data_.resize(elems_ * Depths());
+    }
   }
 
-  void Set(IdxType idx, value_type val) {
-    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
-      return data_.SetItem(idx, val);
-    data_[idx] = val;
+  IdxType DataIndex(PosSpan pos, uint32_t depth = 0) const {
+    DCHECK_EQ(pos.size() + 1, stride_.size());
+    IdxType res = 0;
+    for (size_t i = 0; i < pos.size(); ++i)
+      res += pos[i] * stride_[i];
+    res += depth * stride_.back();
+    return res;
+  }
+
+  void Set(value_type val, PosSpan pos, uint32_t depth = 0) {
+    Set(DataIndex(pos, depth), val);
   }
 
   value_type operator()(PosSpan pos, uint32_t depth = 0) const {
-    DCHECK_EQ(pos.size() + 1, stride_.size());
-    uint64_t idx = 0;    
-    for (size_t i = 0; i < pos.size(); ++i)
-      idx += pos[i] * stride_[i];      
-    idx += depth * stride_.back();    
-    return data_[idx];
+    return data_[DataIndex(pos, depth)];
   }
 
   value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
@@ -148,6 +154,13 @@ protected:
       stride_[*it] = size;
       size *= shape[*it];
     }
+  }
+
+  void Set(IdxType idx, value_type val) {
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+      return data_.SetItem(idx, val);
+    if constexpr (is_specialization_v<DataContainerType, std::vector>)
+      data_[idx] = val;
   }
 
   absl::Status status_;
