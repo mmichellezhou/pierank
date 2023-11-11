@@ -171,14 +171,14 @@ public:
   }
 
   SparseMatrix(const DenseType &dense) {
-    Config(dense.Type(), dense.Shape(), dense.Order());
+    auto order = dense.Order();
     if (dense.SplitDepths()) {
-      // SparseMatrix can't split data dims, which thus must be last in order_
-      auto it = std::find(this->order_.begin(), this->order_.end(),
-                          this->NonDepthDims());
-      CHECK(it != this->order_.end());
-      std::rotate(it, it + 1, this->order_.end());
+      // SparseMatrix can't split data dims, which thus must be last in order.
+      auto it = std::find(order.begin(), order.end(), dense.NonDepthDims());
+      CHECK(it != order.end());
+      std::rotate(it, it + 1, order.end());
     }
+    Config(dense.Type(), dense.Shape(), order);
 
     const uint32_t depths = dense.Depths();
     const uint64_t elem_stride = dense.ElemStride();
@@ -391,6 +391,12 @@ public:
     return true;
   }
 
+  friend bool
+  operator!=(const SparseMatrix<PosType, IdxType, DataContainerType> &lhs,
+             const SparseMatrix<PosType, IdxType, DataContainerType> &rhs) {
+    return !(lhs == rhs);
+  }
+
   void WriteAllButPosAndData(std::ostream *os) const {
     *os << kPieRankMatrixFileMagicNumbers;
     auto status = this->type_.Write(os);
@@ -407,15 +413,17 @@ public:
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
     matrix.WriteAllButPosAndData(&os);
     os << matrix.pos_;
-    WriteUint64(&os, matrix.data_.size());
-    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
-      auto status = matrix.data_.Write(&os);
-      if (!status.ok()) LOG(FATAL) << status.message();
-    } else {
-      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
-        LOG(WARNING) << "Unknown data container type";
-      WriteData<std::ostream, value_type>(&os, matrix.data_.data(),
-                                          matrix.data_.size());
+    if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>) {
+      WriteUint64(&os, matrix.data_.size());
+      if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+        auto status = matrix.data_.Write(&os);
+        if (!status.ok()) LOG(FATAL) << status.message();
+      } else {
+        if constexpr (!is_specialization_v<DataContainerType, std::vector>)
+          LOG(WARNING) << "Unknown data container type";
+        WriteData<std::ostream, value_type>(&os, matrix.data_.data(),
+                                            matrix.data_.size());
+      }
     }
 
     return os;

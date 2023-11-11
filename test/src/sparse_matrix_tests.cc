@@ -515,12 +515,12 @@ TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
   auto dense = mat.ToDense(/*split_depths=*/false);
   CheckDenseMatrix(dense, Real4dTestMatrixTestEntries());
 
-  // SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
-  // EXPECT_EQ(mat, mat0);
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
+  EXPECT_EQ(mat, mat0);
 
   dense = mat.ToDense(/*split_depths=*/true);
   CheckDenseMatrix(dense, Real4dTestMatrixTestEntries());
 
-  // SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
-  // EXPECT_EQ(mat, mat1);
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
+  EXPECT_EQ(mat, mat1);
 }
