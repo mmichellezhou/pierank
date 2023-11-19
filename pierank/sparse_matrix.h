@@ -146,12 +146,12 @@ public:
   using value_type = typename DataContainerType::value_type;
 
   using DenseDataType = typename std::conditional<
-    is_specialization_v<DataContainerType, SparseMatrix>,
+    is_specialization<DataContainerType, SparseMatrix>{},
     std::vector<value_type>,
     DataContainerType>::type;
 
   using DenseType = typename std::conditional<
-    is_specialization_v<DataContainerType, SparseMatrix>,
+    is_specialization<DataContainerType, SparseMatrix>{},
     Matrix<PosType, IdxType, DenseDataType>,
     Matrix<PosType, IdxType, DataContainerType>>::type;
 
