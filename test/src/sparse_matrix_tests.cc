@@ -523,4 +523,15 @@ TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
 
   SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
   EXPECT_EQ(mat, mat1);
+
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+    // auto mat_inverse = Transpose(mat);
+    // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
+    // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat2;
+  EXPECT_OK(mat2.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat2);
 }

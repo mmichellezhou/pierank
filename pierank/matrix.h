@@ -79,6 +79,8 @@ public:
 
   PosType NonIndexDimSize() const { return shape_[order_[1]]; }
 
+  bool IsRoot() const { return index_dim_order_ == 0; }
+
   bool IsLeaf() const { return index_dim_order_ + 3 == shape_.size(); }
 
   // Total number of elements (regardless of their values), where a single

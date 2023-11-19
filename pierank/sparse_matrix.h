@@ -398,13 +398,16 @@ public:
   }
 
   void WriteAllButPosAndData(std::ostream *os) const {
-    *os << kPieRankMatrixFileMagicNumbers;
-    auto status = this->type_.Write(os);
-    if (!status.ok()) *os << status.message();
-    status = StaticDataType().Write(os);
-    if (!status.ok()) *os << status.message();
+    if (this->IsRoot()) {
+      *os << kPieRankMatrixFileMagicNumbers;
+      auto status = this->type_.Write(os);
+      if (!status.ok()) *os << status.message();
+      status = StaticDataType().Write(os);
+      if (!status.ok()) *os << status.message();
+    }
     WriteUint64Vector(os, this->shape_);
     WriteUint32Vector(os, this->order_);
+    WriteUint32(os, this->index_dim_order_);
     ConvertAndWriteUint64(os, nnz_);
     *os << index_;
   }
@@ -413,18 +416,17 @@ public:
   operator<<(std::ostream &os, const SparseMatrix &matrix) {
     matrix.WriteAllButPosAndData(&os);
     os << matrix.pos_;
-    if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>) {
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
+      auto status = matrix.data_.Write(&os);
+      if (!status.ok()) LOG(FATAL) << status.message();
+    } else if constexpr (is_specialization_v<DataContainerType, std::vector>) {
       WriteUint64(&os, matrix.data_.size());
-      if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
-        auto status = matrix.data_.Write(&os);
-        if (!status.ok()) LOG(FATAL) << status.message();
-      } else {
-        if constexpr (!is_specialization_v<DataContainerType, std::vector>)
-          LOG(WARNING) << "Unknown data container type";
-        WriteData<std::ostream, value_type>(&os, matrix.data_.data(),
-                                            matrix.data_.size());
-      }
-    }
+      WriteData<std::ostream, value_type>(&os, matrix.data_.data(),
+                                          matrix.data_.size());
+    } else if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+      os << matrix.data_;
+    } else
+      LOG(FATAL) << "Unsupported data container type";
 
     return os;
   }
@@ -432,21 +434,28 @@ public:
   // Reads {rows, cols, nnz} from `is`
   uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
     uint64_t offset = 0;
-    if (EatString(&is, kPieRankMatrixFileMagicNumbers, &offset)) {
-      auto status = this->type_.Read(&is, &offset);
-      if (!status.ok()) LOG(FATAL) << status.message();
-      DataType data_type;
-      status.Update(data_type.Read(&is, &offset));
-      if (!status.ok()) LOG(FATAL) << status.message();
-      CHECK_EQ(data_type, StaticDataType());
-      this->shape_ = ReadUint64Vector(&is, &offset);
-      this->order_ = ReadUint32Vector(&is, &offset);
-      nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
-      CHECK_LT(this->IndexDim(), this->NonDepthDims());
-      if (!is)
-        this->status_.Update(absl::InternalError("Error read PRM file header"));
+    if (this->IsRoot()) {
+      if (EatString(&is, kPieRankMatrixFileMagicNumbers, &offset)) {
+        auto status = this->type_.Read(&is, &offset);
+        if (!status.ok()) LOG(FATAL) << status.message();
+        DataType data_type;
+        status.Update(data_type.Read(&is, &offset));
+        if (!status.ok()) LOG(FATAL) << status.message();
+        CHECK_EQ(data_type, StaticDataType());
     } else
       this->status_.Update(absl::InternalError("Bad file format"));
+    }
+    this->shape_ = ReadUint64Vector(&is, &offset);
+    this->order_ = ReadUint32Vector(&is, &offset);
+    if (this->IsRoot())
+      Config(this->Type(), this->Shape(), this->Order());
+    this->index_dim_order_ = ReadUint32(&is, &offset);
+    this->non_index_dim_order_ = this->index_dim_order_ + 1;
+    nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
+    CHECK_LT(this->IndexDim(), this->NonDepthDims());
+    if (!is)
+      this->status_.Update(absl::InternalError("Error read PRM file header"));
+
     return offset;
   }
 
@@ -454,16 +463,18 @@ public:
     matrix.ReadPieRankMatrixFileHeader(is);
     is >> matrix.index_;
     is >> matrix.pos_;
-    auto size = ReadUint64(&is);
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
       auto status = matrix.data_.Read(&is);
       if (!status.ok()) LOG(FATAL) << status.message();
-    } else {
-      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
-        LOG(WARNING) << "Unknown data container type";
+    } else if constexpr (is_specialization_v<DataContainerType, std::vector>) {
+      auto size = ReadUint64(&is);
       matrix.data_.resize(size);
       ReadData(&is, matrix.data_.data(), size);
-    }
+    } else if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+      is >> matrix.data_;
+    } else
+      LOG(FATAL) << "Unsupported data container type";
+
     return is;
   }
 
