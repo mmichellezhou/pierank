@@ -14,7 +14,7 @@ Available as an open-source project on [GitHub](https://github.com/mmichellezhou
 
 ### Publication
 
-PieRank is currently under review at the 2023 IEEE International Conference on Big Data. PDF of the paper can be viewed <a href="https://drive.google.com/file/d/12zmBz9jSg6DsNYV5vDceJvKcOidUlCcQ/view?usp=sharing">here</a>.
+PieRank has been accepted as a regular paper to the 2023 IEEE International Conference on Big Data. PDF of the paper can be viewed <a href="https://drive.google.com/file/d/12zmBz9jSg6DsNYV5vDceJvKcOidUlCcQ/view?usp=sharing">here</a>. List of accepted papers can be found <a href="https://bigdataieee.org/BigData2023/AcceptedPapers.html">here</a>.
 
 
 ## Features
