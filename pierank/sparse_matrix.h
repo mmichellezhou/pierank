@@ -87,21 +87,51 @@ inline uint32_t IndexDimInPieRankMatrixPath(absl::string_view prm_path) {
   return std::numeric_limits<uint32_t>::max();
 }
 
-inline absl::StatusOr<std::pair<MatrixType, DataType>>
-PieRankFileTypes(const std::string &prm_path) {
+// Tuple: <MatrixType, DataType, shape, order, index_dim_order, nnz>
+inline absl::StatusOr<std::tuple<MatrixType, DataType, std::vector<uint64_t>,
+                                 std::vector<uint32_t>, uint32_t, uint64_t>>
+PieRankFileInfo(const std::string &prm_path) {
   auto file_or = OpenReadFile(prm_path);
   if (!file_or.ok()) return file_or.status();
   auto file = *std::move(file_or);
-  if (EatString(&file, kPieRankMatrixFileMagicNumbers)) {
-    MatrixType matrix_type;
-    auto status = matrix_type.Read(&file);
-    if (!status.ok()) return status;
-    DataType data_type;
-    status.Update(data_type.Read(&file));
-    if (!status.ok()) return status;
-    return std::make_pair(matrix_type, data_type);
-  } else
+  if (!EatString(&file, kPieRankMatrixFileMagicNumbers))
     return absl::InternalError("Bad file format");
+  MatrixType matrix_type;
+  auto status = matrix_type.Read(&file);
+  if (!status.ok()) return status;
+  DataType data_type;
+  status.Update(data_type.Read(&file));
+  if (!status.ok()) return status;
+  auto shape = ReadUint64Vector(&file);
+  auto order = ReadUint32Vector(&file);
+  auto index_dim_order = ReadUint32(&file);
+  auto nnz = ReadUint64(&file);
+
+  return
+   std::make_tuple(matrix_type, data_type, shape, order, index_dim_order, nnz);
+}
+
+inline absl::StatusOr<std::pair<MatrixType, DataType>>
+PieRankFileTypes(const std::string &prm_path) {
+  auto info = PieRankFileInfo(prm_path);
+  if (!info.ok()) {
+    LOG(ERROR) << info.status().message();
+    return info.status();
+  }
+  auto [matrix_type, data_type, shape, order, index_dim_order, nnz] =
+    *std::move(info);
+  return std::make_pair(matrix_type, data_type);
+}
+
+inline uint32_t PieRankFileDims(const std::string &prm_path) {
+  auto info = PieRankFileInfo(prm_path);
+  if (!info.ok()) {
+    LOG(ERROR) << info.status().message();
+    return 0;
+  }
+  auto [matrix_type, data_type, shape, order, index_dim_order, nnz] =
+    *std::move(info);
+  return shape.size();
 }
 
 /* Example SparseMatrix:
@@ -208,7 +238,7 @@ public:
 
   SparseMatrix &operator=(SparseMatrix &&) = default;
 
-  void Config(MatrixType type, 
+  void Config(MatrixType type,
               const std::vector<uint64_t> &shape,
               const std::vector<uint32_t> &order,
               uint32_t index_dim_order = 0) override {
@@ -508,7 +538,8 @@ public:
     this->status_.Update(pos_.Mmap(path, &offset));
     auto size = ReadUint64AtOffset(&file, &offset);
     if (size) {
-      CHECK(!this->type_.IsPattern()) << "Only non-pattern matrices have data";
+      CHECK(!this->type_.IsPattern() || !this->IsLeaf())
+          << "Only non-pattern or non-leaf matrices have data";
       if (!file) {
         LOG(ERROR) << "Error reading matrix data size";
         return absl::InternalError(absl::StrCat("Error reading file: ", path));
@@ -594,13 +625,16 @@ public:
           this->data_.push_back(std::get<double>(var));
       } else if (family == MatrixType::kComplexFamily) {
         if constexpr (std::is_same_v<value_type, std::complex<double>>) {
-          for (const auto &var : vars)
-            this->data_.push_back(std::get<std::complex<double>>(var));
+          if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>) {
+            for (const auto &var : vars)
+              this->data_.push_back(std::get<std::complex<double>>(var));
+          }
         } else if constexpr (std::is_same_v<value_type, std::complex<float>>) {
-          for (const auto &var : vars) {
-            this->data_.emplace_back(
-                std::get<std::complex<double>>(var).real(),
-                std::get<std::complex<double>>(var).imag());
+          if constexpr (!is_specialization_v<DataContainerType, SparseMatrix>) {
+            for (const auto &var : vars)
+              this->data_.emplace_back(
+                  std::get<std::complex<double>>(var).real(),
+                  std::get<std::complex<double>>(var).imag());
           }
         } else
           CHECK(false) << "Complex matrix must have floating point data type";
@@ -928,6 +962,7 @@ public:
                     "\n");
     absl::StrAppend(&res, tab, "order: ", VectorToString(this->Order(), -1),
                     "\n");
+    absl::StrAppend(&res, tab, "index_dim_order: ", this->IndexDimOrder(), "\n");
     absl::StrAppend(&res, tab, "nnz: ", nnz_, "\n");
     indent += 2;
     absl::StrAppend(&res, tab, "index {\n",
@@ -940,13 +975,19 @@ public:
       absl::StrAppend(&res, tab, "data {\n",
                       this->data_.DebugString(max_items, indent), "}\n");
     } else {
-      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
-        LOG(WARNING) << "Unknown data container type";
-      absl::StrAppend(&res, tab, "data: ",
+      if constexpr (is_specialization_v<DataContainerType, std::vector>) {
+        absl::StrAppend(&res, tab, "data: ",
                       this->data_mmap_.empty()
                       ? VectorToString(this->data_, max_items)
                       : VectorToString<decltype(this->data_mmap_), value_type>(
                           this->data_mmap_, max_items));
+      }
+      else if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+        absl::StrAppend(&res, tab, "data {\n",
+                        this->data_.DebugString(max_items, indent));
+        absl::StrAppend(&res, tab, "}\n");
+      } else
+        LOG(WARNING) << "Unknown data container type";
     }
     absl::StrAppend(&res, "\n");
 
@@ -1144,191 +1185,6 @@ private:
   PosType index_pos_end_ = static_cast<PosType>(-1);
   FlexIdxType index_;
   FlexPosType pos_;
-};
-
-template<typename PosType, typename IdxType>
-class SparseMatrixVar {
-public:
-  enum Enum : uint32_t {
-    kFlexInt64,
-    kDouble,
-    kComplexDouble
-  };
-
-  using SparseMatrixFlexInt64 =
-      SparseMatrix<PosType, IdxType, FlexArray<int64_t>>;
-
-  using SparseMatrixDouble =
-      SparseMatrix<PosType, IdxType, std::vector<double>>;
-
-  using SparseMatrixComplexDouble =
-      SparseMatrix<PosType, IdxType, std::vector<std::complex<double>>>;
-
-  SparseMatrixVar() = default;
-
-  SparseMatrixVar(const SparseMatrixVar &) = delete;
-
-  SparseMatrixVar &operator=(const SparseMatrixVar &) = delete;
-
-  SparseMatrixVar(SparseMatrixVar &&) = default;
-
-  SparseMatrixVar &operator=(SparseMatrixVar &&) = default;
-
-  SparseMatrixVar(SparseMatrixFlexInt64 &&other) {
-    type_ = kFlexInt64;
-    var_.template emplace<kFlexInt64>(
-        std::forward<SparseMatrixFlexInt64>(other));
-  }
-
-  SparseMatrixVar(SparseMatrixDouble &&other) {
-    type_ = kDouble;
-    var_.template emplace<kDouble>(std::forward<SparseMatrixDouble>(other));
-  }
-
-  SparseMatrixVar(SparseMatrixComplexDouble &&other) {
-    type_ = kComplexDouble;
-    var_.template emplace<kComplexDouble>(
-        std::forward<SparseMatrixComplexDouble>(other));
-  }
-
-  SparseMatrixVar(const std::string &prm_path, bool mmap = false) {
-    status_ = mmap ? this->MmapPieRankMatrixFile(prm_path)
-                   : this->ReadPieRankMatrixFile(prm_path);
-  }
-
-  bool ok() const { return status_.ok(); }
-
-  absl::Status status() const { return status_; }
-
-  void SetType(Enum type) {
-    if (type == kFlexInt64)
-      var_.template emplace<kFlexInt64>();
-    else if (type == kDouble)
-      var_.template emplace<kDouble>();
-    else
-      var_.template emplace<kComplexDouble>();
-    type_ = type;
-  }
-
-  void SetType(MatrixType type, bool flex = true) {
-    if (!type.IsComplex()) {
-      if (flex && type.IsInteger()) SetType(kFlexInt64);
-      else SetType(kDouble);
-    }
-    else
-      SetType(kComplexDouble);
-  }
-
-  absl::Status SetTypeFromMatrixMarketFile(const std::string &mtx_path) {
-    auto matrix_type = MatrixMarketFileMatrixType(mtx_path);
-    if (matrix_type == MatrixType::kUnknown)
-      return absl::InternalError("Bad or missing matrix file: " + mtx_path);
-    SetType(matrix_type);
-    return absl::OkStatus();
-  }
-
-  absl::Status SetTypeFromPieRankMatrixFile(const std::string &prm_path) {
-    auto types = PieRankFileTypes(prm_path);
-    if (!types.ok()) return types.status();
-    auto[matrix_type, data_type] = *std::move(types);
-    SetType(matrix_type, data_type.IsFlex());
-    return absl::OkStatus();
-  }
-
-  absl::Status ReadMatrixMarketFile(const std::string &mtx_path) {
-    auto status = SetTypeFromMatrixMarketFile(mtx_path);
-    if (!status.ok()) return status;
-
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).ReadMatrixMarketFile(mtx_path);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).ReadMatrixMarketFile(mtx_path);
-    else
-      return std::get<kComplexDouble>(var_).ReadMatrixMarketFile(mtx_path);
-  }
-
-  absl::Status ReadPieRankMatrixFile(const std::string &prm_path) {
-    auto status = SetTypeFromPieRankMatrixFile(prm_path);
-    if (!status.ok()) return status;
-
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).ReadPieRankMatrixFile(prm_path);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).ReadPieRankMatrixFile(prm_path);
-    else
-      return std::get<kComplexDouble>(var_).ReadPieRankMatrixFile(prm_path);
-  }
-
-  absl::Status WritePieRankMatrixFile(const std::string &prm_path) const {
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).WritePieRankMatrixFile(prm_path);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).WritePieRankMatrixFile(prm_path);
-    else
-      return std::get<kComplexDouble>(var_).WritePieRankMatrixFile(prm_path);
-  }
-
-  absl::StatusOr<SparseMatrixVar<PosType, IdxType>>
-  ChangeIndexDim(std::shared_ptr<ThreadPool> pool = nullptr,
-                 uint64_t max_nnz_per_thread = 8000000) const {
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).ChangeIndexDim(pool, max_nnz_per_thread);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).ChangeIndexDim(pool, max_nnz_per_thread);
-    else
-      return std::get<kComplexDouble>(var_).ChangeIndexDim(pool,
-                                                           max_nnz_per_thread);
-  }
-
-  absl::StatusOr<SparseMatrixVar<PosType, IdxType>>
-  ChangeIndexDim(const std::string &path,
-                 uint64_t max_nnz_per_range = 64000000) const {
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).ChangeIndexDim(path, max_nnz_per_range);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).ChangeIndexDim(path, max_nnz_per_range);
-    else
-      return std::get<kComplexDouble>(var_).ChangeIndexDim(path,
-                                                           max_nnz_per_range);
-  }
-
-  absl::Status MmapPieRankMatrixFile(const std::string &prm_path) {
-    auto status = SetTypeFromPieRankMatrixFile(prm_path);
-    if (!status.ok()) return status;
-
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).MmapPieRankMatrixFile(prm_path);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).MmapPieRankMatrixFile(prm_path);
-    else
-      return std::get<kComplexDouble>(var_).MmapPieRankMatrixFile(prm_path);
-  }
-
-  std::string DebugString(uint64_t max_items = 0, uint32_t indent = 0) const {
-    auto idx = var_.index();
-    if (idx == kFlexInt64)
-      return std::get<kFlexInt64>(var_).DebugString(max_items, indent);
-    else if (idx == kDouble)
-      return std::get<kDouble>(var_).DebugString(max_items, indent);
-    else
-      return std::get<kComplexDouble>(var_).DebugString(max_items, indent);
-  }
-
-protected:
-  absl::Status status_;
-
-private:
-  Enum type_ = kFlexInt64;
-  std::variant<
-      SparseMatrix<PosType, IdxType, FlexArray<int64_t>>,
-      SparseMatrix<PosType, IdxType, std::vector<double>>,
-      SparseMatrix<PosType, IdxType, std::vector<std::complex<double>>>> var_;
 };
 
 }  // namespace pierank

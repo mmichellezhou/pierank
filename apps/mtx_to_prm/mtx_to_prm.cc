@@ -12,6 +12,8 @@
 #include "pierank/pierank.h"
 
 ABSL_FLAG(bool, change_index_in_ram, false, "Use only RAM to change index");
+ABSL_FLAG(std::string, data_type_hint, "auto",
+  "Data type hint in {auto,f32,f64}");
 ABSL_FLAG(uint32_t, max_nnz_per_thread, 8000000,
   "Maximum number of non-zeros per thread for changing index in RAM");
 ABSL_FLAG(uint32_t, max_threads, 16, "Maximum number of concurrent threads");
@@ -37,9 +39,11 @@ int main(int argc, char **argv) {
   CHECK(!prm_file.empty()) << "Bad .mtx file: " << mtx_file;
   std::cout << "prm_file: " << prm_file << std::endl;
 
-  pierank::SparseMatrixVar<uint32_t, uint64_t> var;
+  pierank::SparseTensor var;
   pierank::Timer timer(absl::Now());
-  CHECK_OK(var.ReadMatrixMarketFile(mtx_file));
+  auto data_type_hint = absl::GetFlag(FLAGS_data_type_hint);
+  CHECK_OK(var.ReadMatrixMarketFile(mtx_file, data_type_hint))
+      << "Error reading .mtx file: " << mtx_file;
   std::cout << "mtx_read_time_ms: " << timer.Stop() << std::endl;
 
   if (change_index_dim) {

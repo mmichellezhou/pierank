@@ -234,6 +234,7 @@ public:
       return !std::get<std::complex<double>>(var).real() &&
              !std::get<std::complex<double>>(var).imag();
     CHECK(false);
+    return false;
   }
 
   inline static bool AreVarsZero(const std::vector<Var> &vars) {
@@ -415,8 +416,8 @@ private:
 };
 
 // Tuple: <MatrixType, Shape, Order, #nnz>
-inline absl::StatusOr<std::tuple<MatrixType, const std::vector<uint64_t>&,
-    const std::vector<uint32_t>&, uint64_t>>
+inline absl::StatusOr<std::tuple<MatrixType, std::vector<uint64_t>,
+                                 std::vector<uint32_t>, uint64_t>>
 MatrixMarketFileInfo(const std::string &mtx_path) {
   MatrixMarketIo mat(mtx_path);
   if (!mat.ok()) return absl::InternalError("Bad matrix market file");
@@ -443,6 +444,15 @@ MatrixMarketFileShape(const std::string &mtx_path) {
   }
   auto [type, shape, order, nnz] = *std::move(info);
   return shape;
+}
+
+inline uint32_t MatrixMarketFileMatrixDims(const std::string &mtx_path) {
+  auto shape = MatrixMarketFileShape(mtx_path);
+  if (!shape.ok()) {
+    LOG(ERROR) << shape.status().message();
+    return 0;
+  }
+  return shape->size();
 }
 
 inline absl::StatusOr<std::vector<uint32_t>>

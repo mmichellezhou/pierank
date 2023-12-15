@@ -17,6 +17,12 @@ using namespace pierank;
 
 static constexpr bool kGeneratePieRankMatrixFile = false;
 
+template<typename M>
+void CheckSparseMatrix(const M &mat, const vector<vector<uint32_t>> &entries) {
+  for (auto && pos : entries)
+    EXPECT_EQ(mat(pos), 1);
+}
+
 template<typename M, typename V>
 void CheckSparseMatrix(const M &mat,
                        const vector<pair<vector<uint32_t>, V>> &entries) {
@@ -33,6 +39,24 @@ CheckSparseMatrix(const M &mat,
     EXPECT_EQ(values.size(), depths);
     for (size_t d = 0; d < values.size(); ++d)
       EXPECT_EQ(mat(pos, d), values[d]);
+  }
+}
+
+template<typename M>
+void CheckDenseMatrix(const M &mat, const vector<vector<uint32_t>> &entries) {
+  set<vector<uint32_t>> checked;
+  EXPECT_EQ(mat.Depths(), 1);
+  for (auto && pos : entries) {
+    checked.insert(pos);
+    EXPECT_EQ(mat(pos), 1);
+  }
+
+  const uint64_t elem_stride = mat.ElemStride();
+  for (uint64_t i = 0; i < mat.Elems(); ++i) {
+    auto && [pos, depth] = mat.IdxToPosAndDepth(i * elem_stride);
+    EXPECT_EQ(depth, 0);
+    if (checked.find(pos) != checked.end()) continue;
+    EXPECT_EQ(mat(pos), 0);
   }
 }
 
@@ -520,6 +544,46 @@ TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
 
   dense = mat.ToDense(/*split_depths=*/true);
   CheckDenseMatrix(dense, Real4dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
+  EXPECT_EQ(mat, mat1);
+
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+    // auto mat_inverse = Transpose(mat);
+    // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
+    // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat2;
+  EXPECT_OK(mat2.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat2);
+}
+
+vector<vector<uint32_t>> Pattern4dTestMatrixTestEntries() {
+  return { {0, 1, 0}, {0, 1, 2}, {0, 2, 1}, {0, 2, 2},
+           {0, 2, 3}, {1, 3, 2}, {2, 0, 1}, {2, 1, 0},
+           {2, 1, 3}, {2, 3, 0}, {2, 3, 3}, {2, 4, 1},
+           {2, 4, 3}, {4, 0, 0}, {4, 0, 3}};
+}
+
+TEST(SparseMatrixTests, ReadPattern4dTestMtxFile) {
+  auto file_path = TestDataFilePath("pattern_4d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using SubMat = SparseMatrix<uint32_t, uint64_t>;
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Pattern4dTestMatrixTestEntries());
+
+  // std::cout << mat.NonZeroPosDebugString();
+  auto dense = mat.ToDense(/*split_depths=*/false);
+  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
+  EXPECT_EQ(mat, mat0);
+
+  dense = mat.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
 
   SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
   EXPECT_EQ(mat, mat1);

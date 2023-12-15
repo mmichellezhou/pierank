@@ -29,6 +29,8 @@ public:
 
   Matrix() = default;
 
+  virtual ~Matrix() = default;
+
   Matrix(MatrixType type, 
          const std::vector<uint64_t> &shape,
          const std::vector<uint32_t> &order,
@@ -66,6 +68,8 @@ public:
   IdxType DepthStride() const { return stride_.back(); }
 
   IdxType ElemStride() const { return SplitDepths() ? 1 : Depths(); }
+
+  uint32_t IndexDimOrder() const { return index_dim_order_; }
 
   uint32_t IndexDim() const { return order_[index_dim_order_]; }
 

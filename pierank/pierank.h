@@ -6,6 +6,7 @@
 #include "pierank/macros.h"
 #include "pierank/math_utils.h"
 #include "pierank/sparse_matrix.h"
+#include "pierank/sparse_tensor.h"
 #include "pierank/string_utils.h"
 #include "pierank/thread_pool.h"
 #include "pierank/time_utils.h"

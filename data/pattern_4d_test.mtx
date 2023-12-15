@@ -1,0 +1,30 @@
+%%MatrixMarket matrix coordinate pattern general [shape:(5,5,4,1);order:(0,1,2,3)]
+% MatrixMarket with PieRank extensions:
+% E1: It is a 4D tensor with shape (5, 5, 4, 1)
+% E2: The storage order is (0, 1, 2, 3), same as a multi-dimensional C array
+% Assumptions:
+% A1: The last dimension is depth, which is ALWAYS dense.
+% A2: The last dimension is ALWAYS the last in the storage order
+% A3: The #rows & #cols are determined by the first two dimensions in the
+%     storage order, such that if order[0] < order[1], then:
+%         #rows = shape[order[0]] and #cols = shape[order[1]]
+%     otherwise,
+%         #rows = shape[order[1]] and #cols = shape[order[0]]
+% For example, the original Matrix Market format maps to these extensions:
+% [shape:(#rows,#cols,1),order:(1,0,2)], as .mtx file has column-major ordering.
+5 5 15
+1 2 1
+1 2 3
+1 3 2
+1 3 3
+1 3 4
+2 4 3
+3 1 2
+3 2 1
+3 2 4
+3 4 1
+3 4 4
+3 5 2
+3 5 4
+5 1 1
+5 1 4

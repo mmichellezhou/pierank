@@ -23,6 +23,6 @@ int main(int argc, char **argv) {
   CHECK(!prm_file.empty()) << "Path to .prm file is missing";
 
   bool mmap = absl::GetFlag(FLAGS_mmap);
-  pierank::SparseMatrixVar<uint32_t, uint64_t> mat(prm_file, mmap);
+  pierank::SparseTensor mat(prm_file, mmap);
   std::cout << mat.DebugString(max_items);
 }
