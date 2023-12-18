@@ -255,7 +255,7 @@ public:
   }
 
   // Returns true if all non-zeros are processed; otherwise false.
-  bool ForAllNonZeros(std::function<bool(PosSpan)> func,
+  bool ForAllNonZeros(std::function<bool(PosSpan, IdxType)> func,
                       PosSpanMutable *pos = nullptr,
                       PosSpanMutable *zpos = nullptr) const {
     std::unique_ptr<PosType[]> posa = nullptr;
@@ -288,7 +288,7 @@ public:
             return false;
         } else {
           DCHECK(this->IsLeaf());
-          if (!func(mpos)) return false;
+          if (!func(mpos, i)) return false;
         }
       }
     }
@@ -296,7 +296,7 @@ public:
   }
 
   // Returns true if all non-zeros for an index pos are processed; else false.
-  bool ForNonZerosAtIndexPos(std::function<bool(PosSpan)> func,
+  bool ForNonZerosAtIndexPos(std::function<bool(PosSpan, IdxType)> func,
                              PosSpanMutable pos,
                              PosSpanMutable *zpos = nullptr) const {
     std::unique_ptr<PosType[]> zposa = nullptr;
@@ -315,11 +315,11 @@ public:
       pos[non_idx_dim] = this->Pos(i);
       if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
         DCHECK_LE(i, std::numeric_limits<PosType>::max());
-        zpos[non_idx_dim] = static_cast<PosType>(i);
+        (*zpos)[non_idx_dim] = static_cast<PosType>(i);
         if (!this->data_.ForNonZerosAtIndexPos(func, pos, zpos)) return false;
       } else {
         DCHECK(this->IsLeaf());
-        if (!func(pos)) return false;
+        if (!func(pos, i)) return false;
       }
     }
     return true;
@@ -327,7 +327,8 @@ public:
 
   std::string NonZeroPosDebugString() const {
     std::string res;
-    this->ForAllNonZeros([this, &res](PosSpan pos) {
+    this->ForAllNonZeros([this, &res](PosSpan pos, IdxType unused) {
+      (void)unused;
       for (const auto p : pos)
         absl::StrAppend(&res, " ", p);
       absl::StrAppend(&res, "\n");
@@ -336,23 +337,73 @@ public:
     return res;
   }
 
-  DenseType ToDense(bool split_depths = false) const {
+  DenseType DenseMatrix(bool split_depths = false,
+                        bool omit_idx_dim = false) const {
     std::vector<uint64_t> shape = this->Shape();
     std::vector<uint32_t> order = this->Order();
-    if (split_depths) {
-      std::rotate(order.begin(), order.begin() + this->NonDepthDims(),
-                  order.end());
+    if (omit_idx_dim) {
+      std::copy(shape.begin() + order[0] + 1, shape.end(),
+                shape.begin() + order[0]);  // Remove the index dim from shape
+      shape.pop_back();
+      for (std::size_t i = 1; i < order.size(); ++i)
+        if (order[i] > order[0]) --order[i];  // Make sure min(order[i]) == 0
+      order.erase(order.begin()); // Remove the index dim from order.
     }
+    if (split_depths)
+      std::rotate(order.rbegin(), order.rbegin() + 1, order.rend());
     DenseType res(this->type_, shape, order);
     res.InitData();
+    return res;
+  }
+
+  void GetDense(DenseType *dense, bool split_depths = false) const {
+    DCHECK_EQ(dense->Shape().size(), this->Shape().size());
+    DCHECK_EQ(dense->Order().size(), this->Order().size());
     IdxType data_idx = 0;
     const bool has_data = !this->type_.IsPattern();
-    this->ForAllNonZeros([=, &res, &data_idx](PosSpan pos) {
+    this->ForAllNonZeros([=, &data_idx](PosSpan pos, IdxType unused) {
+      (void)unused;
       for (uint32_t d = 0; d < this->Depths(); ++d)
-        res.Set(has_data ? this->data_[data_idx++] : 1, pos, d);
+        dense->Set(has_data ? this->data_[data_idx++] : 1, pos, d);
       return true;
     });
     DCHECK(!has_data || data_idx >= nnz_ * this->Depths());
+  }
+
+  DenseType ToDense(bool split_depths = false) const {
+    auto res = DenseMatrix(split_depths);
+    GetDense(&res, split_depths);
+    return res;
+  }
+
+  void GetDenseSlice(DenseType *dense, PosType idx_pos,
+                     bool split_depths = false,
+                     bool omit_idx_dim = true) const {
+    if (omit_idx_dim) {
+      DCHECK_EQ(dense->Shape().size() + 1, this->Shape().size());
+      DCHECK_EQ(dense->Order().size() + 1, this->Order().size());
+    } else {
+      DCHECK_EQ(dense->Shape().size(), this->Shape().size());
+      DCHECK_EQ(dense->Order().size(), this->Order().size());
+    }
+    const bool has_data = !this->type_.IsPattern();
+    auto posa = std::make_unique<PosType[]>(this->NonDepthDims());
+    auto pos = PosSpanMutable(posa.get(), this->NonDepthDims());
+    pos[this->IndexDim()] = idx_pos;
+    std::vector<bool> pos_mask(this->NonDepthDims());
+    if (omit_idx_dim) pos_mask[this->IndexDim()] = true;
+    this->ForNonZerosAtIndexPos([=, &pos_mask](PosSpan pos, IdxType idx) {
+      std::size_t data_idx = idx * this->Depths();
+      for (uint32_t d = 0; d < this->Depths(); ++d)
+        dense->Set(has_data ? this->data_[data_idx++] : 1, pos, pos_mask, d);
+      return true;
+    }, pos);
+  }
+
+  DenseType DenseSlice(PosType idx_pos, bool split_depths = false,
+                       bool omit_idx_dim = true) const {
+    auto res = DenseMatrix(split_depths, omit_idx_dim);
+    GetDenseSlice(&res, idx_pos, split_depths, omit_idx_dim);
     return res;
   }
 

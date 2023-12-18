@@ -31,7 +31,7 @@ public:
 
   virtual ~Matrix() = default;
 
-  Matrix(MatrixType type, 
+  Matrix(MatrixType type,
          const std::vector<uint64_t> &shape,
          const std::vector<uint32_t> &order,
          uint32_t index_dim_order = 0) {
@@ -125,12 +125,31 @@ public:
     Set(DataIndex(pos, depth), val);
   }
 
+  IdxType DataIndex(PosSpan pos, const std::vector<bool>& pos_mask,
+                    uint32_t depth = 0) const {
+    DCHECK_EQ(pos.size(), pos_mask.size());
+    IdxType res = 0;
+    std::size_t stride_idx = 0;
+    for (std::size_t i = 0; i < pos.size(); ++i) {
+      if (!pos_mask[i])
+        res += pos[i] * stride_[stride_idx++];
+    }
+    DCHECK_EQ(stride_idx + 1, stride_.size());
+    res += depth * stride_.back();
+    return res;
+  }
+
+  void Set(value_type val, PosSpan pos, const std::vector<bool>& pos_mask,
+           uint32_t depth = 0) {
+    Set(DataIndex(pos, pos_mask, depth), val);
+  }
+
   value_type operator()(PosSpan pos, uint32_t depth = 0) const {
     return data_[DataIndex(pos, depth)];
   }
 
   value_type operator()(PosType row, PosType col, uint32_t depth = 0) const {
-    return (*this)({row, col}, depth);    
+    return (*this)({row, col}, depth);
   }
 
   bool ok() const { return status_.ok(); }
@@ -138,14 +157,14 @@ public:
   absl::Status status() const { return status_; }
 
 protected:
-  virtual void Config(MatrixType type, 
+  virtual void Config(MatrixType type,
                       const std::vector<uint64_t> &shape,
                       const std::vector<uint32_t> &order,
                       uint32_t index_dim_order = 0) {
     CHECK_EQ(shape.size(), order.size());
     type_ = type;
     shape_ = shape;
-    order_ = order;    
+    order_ = order;
     index_dim_order_ = index_dim_order;
     non_index_dim_order_ = index_dim_order + 1;
 

@@ -515,6 +515,46 @@ TEST(SparseMatrixTests, ToDenseReal3dTestMtxFile) {
   EXPECT_EQ(mat, mat1);
 }
 
+vector<vector<uint32_t>> Pattern4dTestMatrixTestEntries() {
+  return { {0, 1, 0}, {0, 1, 2}, {0, 2, 1}, {0, 2, 2},
+           {0, 2, 3}, {1, 3, 2}, {2, 0, 1}, {2, 1, 0},
+           {2, 1, 3}, {2, 3, 0}, {2, 3, 3}, {2, 4, 1},
+           {2, 4, 3}, {4, 0, 0}, {4, 0, 3}};
+}
+
+TEST(SparseMatrixTests, ReadPattern4dTestMtxFile) {
+  auto file_path = TestDataFilePath("pattern_4d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using SubMat = SparseMatrix<uint32_t, uint64_t>;
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Pattern4dTestMatrixTestEntries());
+
+  // std::cout << mat.NonZeroPosDebugString();
+  auto dense = mat.ToDense(/*split_depths=*/false);
+  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
+  EXPECT_EQ(mat, mat0);
+
+  dense = mat.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
+  EXPECT_EQ(mat, mat1);
+
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+    // auto mat_inverse = Transpose(mat);
+    // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
+    // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t, SubMat> mat2;
+  EXPECT_OK(mat2.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat2);
+}
+
 vector<pair<vector<uint32_t>, vector<double>>> Real4dTestMatrixTestEntries() {
   return { {{0, 0, 0}, {0, 0}},
            {{0, 1, 0}, {1.211, 1.212}}, {{0, 1, 2}, {1.231, 1.232}},
@@ -560,32 +600,34 @@ TEST(SparseMatrixTests, ReadReal4dTestMtxFile) {
   EXPECT_EQ(mat, mat2);
 }
 
-vector<vector<uint32_t>> Pattern4dTestMatrixTestEntries() {
-  return { {0, 1, 0}, {0, 1, 2}, {0, 2, 1}, {0, 2, 2},
-           {0, 2, 3}, {1, 3, 2}, {2, 0, 1}, {2, 1, 0},
-           {2, 1, 3}, {2, 3, 0}, {2, 3, 3}, {2, 4, 1},
-           {2, 4, 3}, {4, 0, 0}, {4, 0, 3}};
+vector<vector<uint32_t>> Pattern5dTestMatrixTestEntries() {
+  return { {0, 0, 1, 0}, {0, 2, 1, 0}, {0, 2, 3, 0},
+           {0, 4, 0, 0}, {0, 0, 2, 1}, {0, 2, 0, 1},
+           {0, 2, 4, 1}, {1, 0, 1, 2}, {1, 0, 2, 2},
+           {1, 1, 3, 2}, {1, 0, 2, 3}, {1, 2, 1, 3},
+           {1, 2, 3, 3}, {1, 2, 4, 3}, {1, 4, 0, 3}};
 }
 
-TEST(SparseMatrixTests, ReadPattern4dTestMtxFile) {
-  auto file_path = TestDataFilePath("pattern_4d_test.mtx");
+TEST(SparseMatrixTests, ReadPattern5dTestMtxFile) {
+  auto file_path = TestDataFilePath("pattern_5d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
-  using SubMat = SparseMatrix<uint32_t, uint64_t>;
-  SparseMatrix<uint32_t, uint64_t, SubMat> mat;
+  using SubMat2d = SparseMatrix<uint32_t, uint64_t>;
+  using SubMat3d = SparseMatrix<uint32_t, uint64_t, SubMat2d>;
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat;
   EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
-  CheckSparseMatrix(mat, Pattern4dTestMatrixTestEntries());
+  CheckSparseMatrix(mat, Pattern5dTestMatrixTestEntries());
 
   // std::cout << mat.NonZeroPosDebugString();
   auto dense = mat.ToDense(/*split_depths=*/false);
-  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
+  CheckDenseMatrix(dense, Pattern5dTestMatrixTestEntries());
 
-  SparseMatrix<uint32_t, uint64_t, SubMat> mat0(dense);
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat0(dense);
   EXPECT_EQ(mat, mat0);
 
   dense = mat.ToDense(/*split_depths=*/true);
-  CheckDenseMatrix(dense, Pattern4dTestMatrixTestEntries());
+  CheckDenseMatrix(dense, Pattern5dTestMatrixTestEntries());
 
-  SparseMatrix<uint32_t, uint64_t, SubMat> mat1(dense);
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat1(dense);
   EXPECT_EQ(mat, mat1);
 
   auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
@@ -595,7 +637,100 @@ TEST(SparseMatrixTests, ReadPattern4dTestMtxFile) {
     // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
     // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
   }
-  SparseMatrix<uint32_t, uint64_t, SubMat> mat2;
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat2;
   EXPECT_OK(mat2.ReadPieRankMatrixFile(prm_path));
   EXPECT_EQ(mat, mat2);
+}
+
+vector<pair<vector<uint32_t>, vector<double>>> Real5dTestMatrixTestEntries() {
+  return { {{0, 0, 0, 0}, {0, 0, 0}},
+           {{0, 0, 1, 0}, {1.1211, 1.1212, 1.1213}},
+           {{0, 2, 1, 0}, {1.3211, 1.3212, 1.3213}},
+           {{0, 2, 3, 0}, {1.3411, 1.3412, 1.3413}},
+           {{0, 4, 0, 0}, {1.5111, 1.5112, 1.5113}},
+           {{0, 0, 2, 1}, {1.1321, 1.1322, 1.1323}},
+           {{0, 2, 0, 1}, {1.3121, 1.3122, 1.3123}},
+           {{0, 2, 4, 1}, {1.3521, 1.3522, 1.3523}},
+           {{1, 0, 1, 2}, {2.1231, 2.1232, 2.1233}},
+           {{1, 0, 2, 2}, {2.1331, 2.1332, 2.1333}},
+           {{1, 1, 3, 2}, {2.2431, 2.2432, 2.2433}},
+           {{1, 0, 2, 3}, {2.1341, 2.1342, 2.1343}},
+           {{1, 2, 1, 3}, {2.3241, 2.3242, 2.3243}},
+           {{1, 2, 3, 3}, {2.3441, 2.3442, 2.3443}},
+           {{1, 2, 4, 3}, {2.3541, 2.3542, 2.3543}},
+           {{1, 4, 0, 3}, {2.5141, 2.5142, 2.5143}}};
+}
+
+TEST(SparseMatrixTests, ReadReal5dTestMtxFile) {
+  auto file_path = TestDataFilePath("real_5d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using SubMat2d = SparseMatrix<uint32_t, uint64_t>;
+  using SubMat3d = SparseMatrix<uint32_t, uint64_t, SubMat2d>;
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Real5dTestMatrixTestEntries());
+
+  // std::cout << mat.NonZeroPosDebugString();
+  auto dense = mat.ToDense(/*split_depths=*/false);
+  CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat0(dense);
+  EXPECT_EQ(mat, mat0);
+
+  dense = mat.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
+
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat1(dense);
+  EXPECT_EQ(mat, mat1);
+
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(mat.WritePieRankMatrixFile(prm_path));
+    // auto mat_inverse = Transpose(mat);
+    // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
+    // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
+  }
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat2;
+  EXPECT_OK(mat2.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(mat, mat2);
+}
+
+vector<pair<vector<uint32_t>, vector<double>>> Real5dSliceMatrixTestEntries() {
+  return { {{0, 1, 2}, {2.1231, 2.1232, 2.1233}},
+           {{0, 2, 2}, {2.1331, 2.1332, 2.1333}},
+           {{1, 3, 2}, {2.2431, 2.2432, 2.2433}},
+           {{0, 2, 3}, {2.1341, 2.1342, 2.1343}},
+           {{2, 1, 3}, {2.3241, 2.3242, 2.3243}},
+           {{2, 3, 3}, {2.3441, 2.3442, 2.3443}},
+           {{2, 4, 3}, {2.3541, 2.3542, 2.3543}},
+           {{4, 0, 3}, {2.5141, 2.5142, 2.5143}}};
+}
+
+TEST(SparseMatrixTests, Real5dSliceTestMtxFile) {
+  auto file_path = TestDataFilePath("real_5d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  using SubMat2d = SparseMatrix<uint32_t, uint64_t>;
+  using SubMat3d = SparseMatrix<uint32_t, uint64_t, SubMat2d>;
+  SparseMatrix<uint32_t, uint64_t, SubMat3d> mat;
+  EXPECT_OK(mat.ReadMatrixMarketFile(file_path));
+  CheckSparseMatrix(mat, Real5dTestMatrixTestEntries());
+
+  // std::cout << mat.NonZeroPosDebugString();
+  auto dense_slice =
+    mat.DenseSlice(1, /*split_depths=*/false, /*omit_idx_dim=*/true);
+  CheckDenseMatrix(dense_slice, Real5dSliceMatrixTestEntries());
+
+  dense_slice =
+    mat.DenseSlice(1, /*split_depths=*/true, /*omit_idx_dim=*/true);
+  CheckDenseMatrix(dense_slice, Real5dSliceMatrixTestEntries());
+
+  auto dense = mat.DenseMatrix(/*split_depths=*/false);
+  mat.GetDenseSlice(&dense, 0, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  mat.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
+
+  dense = mat.DenseMatrix(/*split_depths=*/true);
+  mat.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  mat.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
 }
