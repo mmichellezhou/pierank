@@ -363,7 +363,8 @@ public:
     std::vector<uint64_t> pos(depth_dim);
     for (std::size_t i = 0; i < depth_dim; ++i) {
       is_ >> pos[i];
-      --pos[i];  // MatrixMarket position starts at 1 instead of 0
+      CHECK_GT(pos[i], 0) << "MatrixMarket position starts at 1 instead of 0";
+      --pos[i];
     }
     std::vector<Var> vars;
     uint32_t depths = Depths();

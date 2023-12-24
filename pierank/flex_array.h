@@ -692,4 +692,3 @@ private:
 }  // namespace pierank
 
 #endif //PIERANK_FLEX_ARRAY_H_
-

@@ -724,13 +724,85 @@ TEST(SparseMatrixTests, Real5dSliceTestMtxFile) {
     mat.DenseSlice(1, /*split_depths=*/true, /*omit_idx_dim=*/true);
   CheckDenseMatrix(dense_slice, Real5dSliceMatrixTestEntries());
 
-  auto dense = mat.DenseMatrix(/*split_depths=*/false);
+  auto dense = mat.Dense(/*split_depths=*/false);
   mat.GetDenseSlice(&dense, 0, /*split_depth=*/false, /*omit_idx_dim=*/false);
   mat.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
   CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
 
-  dense = mat.DenseMatrix(/*split_depths=*/true);
+  dense = mat.Dense(/*split_depths=*/true);
   mat.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
   mat.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
   CheckDenseMatrix(dense, Real5dTestMatrixTestEntries());
+}
+
+template<typename V>
+void
+CheckSparseTensor(const SparseTensor &tsr,
+                  const vector<pair<vector<uint32_t>, vector<V>>> &entries) {
+  uint32_t depths = tsr.Var4d().VarF64().Depths();
+  EXPECT_EQ(depths, tsr.Depths());
+  for (auto && [pos, values] : entries) {
+    EXPECT_EQ(values.size(), depths);
+    for (size_t d = 0; d < values.size(); ++d)
+      EXPECT_EQ(ValueF64(tsr(pos, d)), values[d]);
+  }
+}
+
+TEST(SparseTensorTests, ReadReal5dTestMtxFile) {
+  auto file_path = TestDataFilePath("real_5d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseTensor tsr;
+  EXPECT_OK(tsr.ReadMatrixMarketFile(file_path));
+  CheckSparseTensor(tsr, Real5dTestMatrixTestEntries());
+
+  // std::cout << tsr.NonZeroPosDebugString();
+  auto dense = tsr.ToDense(/*split_depths=*/false);
+  CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
+
+  SparseTensor tsr0(dense);
+  EXPECT_EQ(tsr, tsr0);
+
+  dense = tsr.ToDense(/*split_depths=*/true);
+  CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
+
+  SparseTensor tsr1(dense);
+  EXPECT_EQ(tsr, tsr1);
+
+  auto prm_path = MatrixMarketToPieRankMatrixPath(file_path);
+  if (kGeneratePieRankMatrixFile) {
+    EXPECT_OK(tsr.WritePieRankMatrixFile(prm_path));
+    // auto mat_inverse = Transpose(tsr);
+    // std::string inverse_prm_path = PieRankMatrixPathAfterIndexChange(prm_path);
+    // EXPECT_OK(mat_inverse.WritePieRankMatrixFile(inverse_prm_path));
+  }
+  SparseTensor tsr2;
+  EXPECT_OK(tsr2.ReadPieRankMatrixFile(prm_path));
+  EXPECT_EQ(tsr, tsr2);
+}
+
+TEST(SparseTensorTests, Real5dSliceTestMtxFile) {
+  auto file_path = TestDataFilePath("real_5d_test.mtx");
+  CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
+  SparseTensor tsr;
+  EXPECT_OK(tsr.ReadMatrixMarketFile(file_path));
+  CheckSparseTensor(tsr, Real5dTestMatrixTestEntries());
+
+  // std::cout << tsr.NonZeroPosDebugString();
+  auto dense_slice =
+    tsr.DenseSlice(1, /*split_depths=*/false, /*omit_idx_dim=*/true);
+  CheckDenseMatrix(DenseF64(dense_slice), Real5dSliceMatrixTestEntries());
+
+  dense_slice =
+    tsr.DenseSlice(1, /*split_depths=*/true, /*omit_idx_dim=*/true);
+  CheckDenseMatrix(DenseF64(dense_slice), Real5dSliceMatrixTestEntries());
+
+  auto dense = tsr.Dense(/*split_depths=*/false);
+  tsr.GetDenseSlice(&dense, 0, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  tsr.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
+
+  dense = tsr.Dense(/*split_depths=*/true);
+  tsr.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  tsr.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
 }

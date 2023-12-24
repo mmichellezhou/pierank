@@ -153,6 +153,10 @@ template<typename PosType, typename IdxType,
     typename DataContainerType = std::vector<double>>
 class SparseMatrix : public Matrix<PosType, IdxType, DataContainerType> {
 public:
+  using PosT = PosType;
+
+  using IdxT = IdxType;
+
   // <min_pos, max_pos, nnz>
   using PosRange = std::tuple<PosType, PosType, IdxType>;
 
@@ -165,25 +169,17 @@ public:
   // PosRanges for InitRanges, UpdateRanges, and SyncRanges
   using TriplePosRanges = std::array<PosRanges, 3>;
 
-  using FlexIdxType = FlexArray<IdxType>;
-
-  using FlexIdxIterator = typename FlexIdxType::Iterator;
-
   using FlexPosType = FlexArray<PosType>;
 
   using FlexPosIterator = typename FlexPosType::Iterator;
 
+  using FlexIdxType = FlexArray<IdxType>;
+
+  using FlexIdxIterator = typename FlexIdxType::Iterator;
+
   using value_type = typename DataContainerType::value_type;
 
-  using DenseDataType = typename std::conditional<
-    is_specialization<DataContainerType, SparseMatrix>{},
-    std::vector<value_type>,
-    DataContainerType>::type;
-
-  using DenseType = typename std::conditional<
-    is_specialization<DataContainerType, SparseMatrix>{},
-    Matrix<PosType, IdxType, DenseDataType>,
-    Matrix<PosType, IdxType, DataContainerType>>::type;
+  using DenseType = Matrix<PosType, IdxType, std::vector<value_type>>;
 
   using Var = MatrixMarketIo::Var;
 
@@ -217,7 +213,14 @@ public:
       DCHECK_EQ(depth, 0);
       bool all_zeros = true;
       for (uint32_t d = 0; d < depths && all_zeros; ++d) {
-        if (dense(pos, d) != 0) all_zeros = false;
+        if constexpr (std::is_same_v<decltype(dense(pos, d)),
+                                     std::complex<double>>) {
+          if (dense(pos, d) != 0.0) all_zeros = false;
+        } else if constexpr (std::is_same_v<decltype(dense(pos, d)),
+                                            std::complex<float>>) {
+          if (dense(pos, d) != 0.0f) all_zeros = false;
+        } else
+          if (dense(pos, d) != 0) all_zeros = false;
       }
       if (!all_zeros) {
         std::vector<MatrixMarketIo::Var> vars;
@@ -337,8 +340,7 @@ public:
     return res;
   }
 
-  DenseType DenseMatrix(bool split_depths = false,
-                        bool omit_idx_dim = false) const {
+  DenseType Dense(bool split_depths = false, bool omit_idx_dim = false) const {
     std::vector<uint64_t> shape = this->Shape();
     std::vector<uint32_t> order = this->Order();
     if (omit_idx_dim) {
@@ -371,7 +373,7 @@ public:
   }
 
   DenseType ToDense(bool split_depths = false) const {
-    auto res = DenseMatrix(split_depths);
+    auto res = Dense(split_depths);
     GetDense(&res, split_depths);
     return res;
   }
@@ -402,7 +404,7 @@ public:
 
   DenseType DenseSlice(PosType idx_pos, bool split_depths = false,
                        bool omit_idx_dim = true) const {
-    auto res = DenseMatrix(split_depths, omit_idx_dim);
+    auto res = Dense(split_depths, omit_idx_dim);
     GetDenseSlice(&res, idx_pos, split_depths, omit_idx_dim);
     return res;
   }
