@@ -83,29 +83,24 @@ public:
   SparseTensorVar &operator=(SparseTensorVar &&) = default;
 
   SparseTensorVar(Int64TensorType &&other) {
-    type_ = kInt64;
     var_.template emplace<kInt64>(
         std::forward<Int64TensorType>(other));
   }
 
   SparseTensorVar(FloatTensorType &&other) {
-    type_ = kFloat;
     var_.template emplace<kFloat>(std::forward<FloatTensorType>(other));
   }
 
   SparseTensorVar(DoubleTensorType &&other) {
-    type_ = kDouble;
     var_.template emplace<kDouble>(std::forward<DoubleTensorType>(other));
   }
 
   SparseTensorVar(ComplexFloatTensorType &&other) {
-    type_ = kComplexFloat;
     var_.template emplace<kComplexFloat>(
         std::forward<ComplexFloatTensorType>(other));
   }
 
   SparseTensorVar(ComplexDoubleTensorType &&other) {
-    type_ = kComplexDouble;
     var_.template emplace<kComplexDouble>(
         std::forward<ComplexDoubleTensorType>(other));
   }
@@ -176,7 +171,6 @@ public:
       DCHECK_EQ(type, kComplexDouble);
       var_.template emplace<kComplexDouble>();
     }
-    type_ = type;
   }
 
   void InferType(MatrixType type, const std::string &type_hint) {
@@ -706,7 +700,6 @@ protected:
   absl::Status status_;
 
 private:
-  Type type_ = kUnknown;
   SparseVar var_;
 };
 
@@ -774,33 +767,17 @@ enum Type : uint32_t {
 
   ScalarVar &operator=(ScalarVar &&) = default;
 
-  ScalarVar(int64_t other) {
-    type_ = kInt64;
-    var_ = other;
-  }
+  ScalarVar(int64_t other) { var_ = other; }
 
-  ScalarVar(float other) {
-    type_ = kFloat;
-    var_ = other;
-  }
+  ScalarVar(float other) { var_ = other; }
 
-  ScalarVar(double other) {
-    type_ = kDouble;
-    var_ = other;
-  }
+  ScalarVar(double other) { var_ = other; }
 
-  ScalarVar(std::complex<float> other) {
-    type_ = kComplexFloat;
-    var_ = other;
-  }
+  ScalarVar(std::complex<float> other) { var_ = other; }
 
-  ScalarVar(std::complex<double> other) {
-    type_ = kComplexDouble;
-    var_ = other;
-  }
+  ScalarVar(std::complex<double> other) { var_ = other; }
 
 private:
-  Type type_ = kUnknown;
   std::variant<
       std::monostate,
       int64_t, float, double, std::complex<float>, std::complex<double>> var_;
