@@ -785,24 +785,43 @@ TEST(SparseTensorTests, Real5dSliceTestMtxFile) {
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
   SparseTensor tsr;
   EXPECT_OK(tsr.ReadMatrixMarketFile(file_path));
+  EXPECT_EQ(tsr.GetMatrixType(), MatrixType::kCoordinateRealGeneral);
+  EXPECT_EQ(tsr.Shape(), std::vector<uint64_t>({2, 5, 5, 4, 3}));
+  EXPECT_EQ(tsr.Order(), std::vector<uint32_t>({0, 3, 1, 2, 4}));
+  EXPECT_EQ(tsr.Rows(), 2);
+  EXPECT_EQ(tsr.Cols(), 4);
+  EXPECT_EQ(tsr.NonDepthDims(), 4);
+  EXPECT_EQ(tsr.IndexDimOrder(), 0);
+  EXPECT_EQ(tsr.IndexDim(), 0);
+  EXPECT_EQ(tsr.NonIndexDim(), 3);
+  EXPECT_EQ(tsr.MaxDimSize(), 5);
+  EXPECT_EQ(tsr.IndexDimSize(), 2);
+  EXPECT_EQ(tsr.NonIndexDimSize(), 4);
+  EXPECT_EQ(*ValueF64Ptr(tsr.data()), 1.1211);
   CheckSparseTensor(tsr, Real5dTestMatrixTestEntries());
 
   // std::cout << tsr.NonZeroPosDebugString();
   auto dense_slice =
     tsr.DenseSlice(1, /*split_depths=*/false, /*omit_idx_dim=*/true);
+  EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense_slice) + 1,
+            tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense_slice), Real5dSliceMatrixTestEntries());
 
   dense_slice =
     tsr.DenseSlice(1, /*split_depths=*/true, /*omit_idx_dim=*/true);
+  EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense_slice) + 1,
+            tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense_slice), Real5dSliceMatrixTestEntries());
 
   auto dense = tsr.Dense(/*split_depths=*/false);
   tsr.GetDenseSlice(&dense, 0, /*split_depth=*/false, /*omit_idx_dim=*/false);
   tsr.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense), tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
 
   dense = tsr.Dense(/*split_depths=*/true);
   tsr.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
   tsr.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense), tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
 }

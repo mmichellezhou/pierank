@@ -66,11 +66,19 @@ public:
 
   using ValueVar = std::variant<
       std::monostate,
-      typename Int64TensorType::value_type,
-      typename FloatTensorType::value_type,
-      typename DoubleTensorType::value_type,
-      typename ComplexFloatTensorType::value_type,
-      typename ComplexDoubleTensorType::value_type>;
+      int64_t,
+      float,
+      double,
+      std::complex<float>,
+      std::complex<double>>;
+
+  using ValuePtr = std::variant<
+      nullptr_t,
+      const int64_t *,
+      const float *,
+      const double *,
+      const std::complex<float> *,
+      const std::complex<double> *>;
 
   SparseTensorVar() = default;
 
@@ -558,6 +566,102 @@ public:
     }
   }
 
+  const MatrixType &GetMatrixType() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).Type();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).Type();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).Type();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).Type();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).Type();
+    }
+  }
+
+  const std::vector<uint64_t> &Shape() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).Shape();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).Shape();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).Shape();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).Shape();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).Shape();
+    }
+  }
+
+  const std::vector<uint32_t> &Order() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).Order();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).Order();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).Order();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).Order();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).Order();
+    }
+  }
+
+  PosType Rows() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).Rows();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).Rows();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).Rows();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).Rows();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).Rows();
+    }
+  }
+
+  PosType Cols() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).Cols();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).Cols();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).Cols();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).Cols();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).Cols();
+    }
+  }
+
+  ValuePtr data() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).data();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).data();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).data();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).data();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).data();
+    }
+  }
+
   uint32_t Depths() const {
     auto idx = var_.index();
     if (idx == kInt64)
@@ -571,6 +675,118 @@ public:
     else {
       DCHECK_EQ(idx, kComplexDouble);
       return std::get<kComplexDouble>(var_).Depths();
+    }
+  }
+
+  uint32_t NonDepthDims() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).NonDepthDims();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).NonDepthDims();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).NonDepthDims();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).NonDepthDims();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).NonDepthDims();
+    }
+  }
+
+  uint32_t IndexDimOrder() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).IndexDimOrder();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).IndexDimOrder();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).IndexDimOrder();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).IndexDimOrder();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).IndexDimOrder();
+    }
+  }
+
+  uint32_t IndexDim() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).IndexDim();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).IndexDim();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).IndexDim();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).IndexDim();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).IndexDim();
+    }
+  }
+
+  uint32_t NonIndexDim() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).NonIndexDim();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).NonIndexDim();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).NonIndexDim();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).NonIndexDim();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).NonIndexDim();
+    }
+  }
+
+  PosType MaxDimSize() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).MaxDimSize();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).MaxDimSize();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).MaxDimSize();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).MaxDimSize();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).MaxDimSize();
+    }
+  }
+
+  PosType IndexDimSize() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).IndexDimSize();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).IndexDimSize();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).IndexDimSize();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).IndexDimSize();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).IndexDimSize();
+    }
+  }
+
+  PosType NonIndexDimSize() const {
+    auto idx = var_.index();
+    if (idx == kInt64)
+      return std::get<kInt64>(var_).NonIndexDimSize();
+    else if (idx == kFloat)
+      return std::get<kFloat>(var_).NonIndexDimSize();
+    else if (idx == kDouble)
+      return std::get<kDouble>(var_).NonIndexDimSize();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(var_).NonIndexDimSize();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(var_).NonIndexDimSize();
     }
   }
 
@@ -799,6 +1015,8 @@ public:
                                  SparseTensor3dVar, SparseTensor4dVar>;
 
   using ValueVar = typename SparseMatrixVar::ValueVar;
+
+  using ValuePtr = typename SparseMatrixVar::ValuePtr;
 
   using FlexPosType = FlexArray<PosType>;
 
@@ -1141,6 +1359,78 @@ public:
     }
   }
 
+  const MatrixType &GetMatrixType() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).GetMatrixType();
+    else if (dims == 3)
+      return std::get<3>(var_).GetMatrixType();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).GetMatrixType();
+    }
+  }
+
+  const std::vector<uint64_t> &Shape() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).Shape();
+    else if (dims == 3)
+      return std::get<3>(var_).Shape();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).Shape();
+    }
+  }
+
+  const std::vector<uint32_t> &Order() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).Order();
+    else if (dims == 3)
+      return std::get<3>(var_).Order();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).Order();
+    }
+  }
+
+  PosType Rows() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).Rows();
+    else if (dims == 3)
+      return std::get<3>(var_).Rows();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).Rows();
+    }
+  }
+
+  PosType Cols() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).Cols();
+    else if (dims == 3)
+      return std::get<3>(var_).Cols();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).Cols();
+    }
+  }
+
+  ValuePtr data() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).data();
+    else if (dims == 3)
+      return std::get<3>(var_).data();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).data();
+    }
+  }
+
   uint32_t Depths() const {
     auto dims = var_.index();
     if (dims == 2)
@@ -1153,8 +1443,91 @@ public:
     }
   }
 
-  friend bool
-  operator==(const SparseTensor &lhs, const SparseTensor &rhs) {
+  uint32_t NonDepthDims() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).NonDepthDims();
+    else if (dims == 3)
+      return std::get<3>(var_).NonDepthDims();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).NonDepthDims();
+    }
+  }
+
+  uint32_t IndexDimOrder() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).IndexDimOrder();
+    else if (dims == 3)
+      return std::get<3>(var_).IndexDimOrder();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).IndexDimOrder();
+    }
+  }
+
+  uint32_t IndexDim() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).IndexDim();
+    else if (dims == 3)
+      return std::get<3>(var_).IndexDim();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).IndexDim();
+    }
+  }
+
+  uint32_t NonIndexDim() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).NonIndexDim();
+    else if (dims == 3)
+      return std::get<3>(var_).NonIndexDim();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).NonIndexDim();
+    }
+  }
+
+  PosType MaxDimSize() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).MaxDimSize();
+    else if (dims == 3)
+      return std::get<3>(var_).MaxDimSize();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).MaxDimSize();
+    }
+  }
+
+  PosType IndexDimSize() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).IndexDimSize();
+    else if (dims == 3)
+      return std::get<3>(var_).IndexDimSize();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).IndexDimSize();
+    }
+  }
+
+  PosType NonIndexDimSize() const {
+    auto dims = var_.index();
+    if (dims == 2)
+      return std::get<2>(var_).NonIndexDimSize();
+    else if (dims == 3)
+      return std::get<3>(var_).NonIndexDimSize();
+    else {
+      DCHECK_EQ(dims, 4);
+      return std::get<4>(var_).NonIndexDimSize();
+    }
+  }
+
+  friend bool operator==(const SparseTensor &lhs, const SparseTensor &rhs) {
     if (lhs.var_.index() != rhs.var_.index()) return false;
     auto dims = lhs.var_.index();
     if (dims == 2)
@@ -1167,8 +1540,7 @@ public:
     }
   }
 
-  friend bool
-  operator!=(const SparseTensor &lhs, const SparseTensor &rhs) {
+  friend bool operator!=(const SparseTensor &lhs, const SparseTensor &rhs) {
     return !(lhs == rhs);
   }
 
@@ -1276,6 +1648,26 @@ inline auto ValueC32(const SparseTensor::ValueVar &var) {
 
 inline auto ValueC64(const SparseTensor::ValueVar &var) {
   return std::get<SparseTensor::Type::kComplexDouble>(var);
+}
+
+inline auto ValueI64Ptr(const SparseTensor::ValuePtr &ptr) {
+  return std::get<SparseTensor::Type::kInt64>(ptr);
+}
+
+inline auto ValueF32Ptr(const SparseTensor::ValuePtr &ptr) {
+  return std::get<SparseTensor::Type::kFloat>(ptr);
+}
+
+inline auto ValueF64Ptr(const SparseTensor::ValuePtr &ptr) {
+  return std::get<SparseTensor::Type::kDouble>(ptr);
+}
+
+inline auto ValueC32Ptr(const SparseTensor::ValuePtr &ptr) {
+  return std::get<SparseTensor::Type::kComplexFloat>(ptr);
+}
+
+inline auto ValueC64Ptr(const SparseTensor::ValuePtr &ptr) {
+  return std::get<SparseTensor::Type::kComplexDouble>(ptr);
 }
 
 }  // namespace pierank

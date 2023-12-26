@@ -56,6 +56,13 @@ public:
 
   PosType Cols() const { return shape_[std::max(order_[0], order_[1])]; }
 
+  const value_type* data() const {
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+      return reinterpret_cast<const value_type*>(data_.data());
+    else
+      return data_.data();
+  }
+
   uint32_t Depths() const { return shape_.back(); }
 
   // Returns the # of non-depth dimensions.
@@ -121,6 +128,16 @@ public:
     return res;
   }
 
+  void Set(IdxType idx, value_type val) {
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+      return data_.SetItem(idx, val);
+    else {
+      if constexpr (!is_specialization_v<DataContainerType, std::vector>)
+        CHECK(false);
+      data_[idx] = val;
+    }
+  }
+
   void Set(value_type val, PosSpan pos, uint32_t depth = 0) {
     Set(DataIndex(pos, depth), val);
   }
@@ -179,13 +196,6 @@ protected:
       stride_[*it] = size;
       size *= shape[*it];
     }
-  }
-
-  void Set(IdxType idx, value_type val) {
-    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
-      return data_.SetItem(idx, val);
-    if constexpr (is_specialization_v<DataContainerType, std::vector>)
-      data_[idx] = val;
   }
 
   absl::Status status_;

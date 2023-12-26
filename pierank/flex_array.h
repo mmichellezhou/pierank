@@ -249,7 +249,7 @@ public:
     num_items_ += other.num_items_;
   }
 
-  inline const char *Data() const {
+  inline const char *data() const {
     return vals_mmap_.empty() ? vals_.data() : vals_mmap_.data();
   }
 
@@ -264,7 +264,7 @@ public:
              : reinterpret_cast<const T *>(vals_mmap_.data())[idx];
     }
 
-    auto *ptr = Data();
+    auto *ptr = data();
     ptr += idx * item_size_;
     T res = 0;
     PIERANK_CONST_MEMCPY(&res, ptr, item_size_);
@@ -375,7 +375,7 @@ public:
     if (lhs.num_items_ != rhs.num_items_) return false;
     if (lhs.item_size_ == rhs.item_size_ && lhs.Bytes() == rhs.Bytes()
         && lhs.sketch_bits_ == rhs.sketch_bits_) {
-      return memcmp(lhs.Data(), rhs.Data(), lhs.Bytes()) == 0;
+      return memcmp(lhs.data(), rhs.data(), lhs.Bytes()) == 0;
     }
 
     for (uint64_t i = 0; i < lhs.num_items_; ++i) {

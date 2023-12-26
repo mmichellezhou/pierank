@@ -956,7 +956,7 @@ public:
         return absl::InternalError("Error read file: " + pos_file);
       CHECK_EQ(pos.size(), num_items);
       total_items += num_items;
-      if (!WriteData(&ofs, pos.Data(), pos_item_size * num_items))
+      if (!WriteData(&ofs, pos.data(), pos_item_size * num_items))
         return absl::InternalError("Error write file: " + path);
       std::remove(pos_file.c_str());
     }
