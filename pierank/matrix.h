@@ -36,6 +36,9 @@ public:
          const std::vector<uint32_t> &order,
          uint32_t index_dim_order = 0) {
     Config(type, shape, order, index_dim_order);
+    if constexpr (is_specialization_v<DataContainerType, FlexArray> ||
+                  is_specialization_v<DataContainerType, std::vector>)
+      data_.resize(elems_ * Depths());
   }
 
   Matrix(const Matrix &) = delete;
@@ -112,11 +115,10 @@ public:
   }
 
   void InitData() {
-    if constexpr (is_specialization_v<DataContainerType, FlexArray> ||
-                  is_specialization_v<DataContainerType, std::vector>) {
-      data_.clear();
-      data_.resize(elems_ * Depths());
-    }
+    if constexpr (is_specialization_v<DataContainerType, FlexArray>)
+      data_.Reset();
+    else if constexpr (is_specialization_v<DataContainerType, std::vector>)
+      std::memset(data_.data(), 0, data_.size() * sizeof(data_[0]));
   }
 
   IdxType DataIndex(PosSpan pos, uint32_t depth = 0) const {

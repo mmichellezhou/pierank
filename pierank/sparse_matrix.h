@@ -330,7 +330,7 @@ public:
 
   std::string NonZeroPosDebugString() const {
     std::string res;
-    this->ForAllNonZeros([this, &res](PosSpan pos, IdxType unused) {
+    this->ForAllNonZeros([&res](PosSpan pos, IdxType unused) {
       (void)unused;
       for (const auto p : pos)
         absl::StrAppend(&res, " ", p);

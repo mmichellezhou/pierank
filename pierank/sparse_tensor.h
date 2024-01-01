@@ -73,7 +73,7 @@ public:
       std::complex<double>>;
 
   using ValuePtr = std::variant<
-      nullptr_t,
+      std::nullptr_t,
       const int64_t *,
       const float *,
       const double *,
@@ -147,6 +147,22 @@ public:
     else {
       DCHECK_EQ(idx, kComplexDouble);
       return std::get<kComplexDouble>(dense).NonDepthDims();
+    }
+  }
+
+  static void InitDense(DenseVar *dense) {
+    auto idx = dense->index();
+    if (idx == kInt64)
+      return std::get<kInt64>(*dense).InitData();
+    else if (idx == kFloat)
+      return std::get<kFloat>(*dense).InitData();
+    else if (idx == kDouble)
+      return std::get<kDouble>(*dense).InitData();
+    else if (idx == kComplexFloat)
+      return std::get<kComplexFloat>(*dense).InitData();
+    else {
+      DCHECK_EQ(idx, kComplexDouble);
+      return std::get<kComplexDouble>(*dense).InitData();
     }
   }
 
@@ -1668,6 +1684,10 @@ inline auto ValueC32Ptr(const SparseTensor::ValuePtr &ptr) {
 
 inline auto ValueC64Ptr(const SparseTensor::ValuePtr &ptr) {
   return std::get<SparseTensor::Type::kComplexDouble>(ptr);
+}
+
+inline void InitDense(SparseTensor::DenseVar *var) {
+  return SparseMatrixVar::InitDense(var);
 }
 
 }  // namespace pierank
