@@ -780,6 +780,36 @@ TEST(SparseTensorTests, ReadReal5dTestMtxFile) {
   EXPECT_EQ(tsr, tsr2);
 }
 
+template<SparseTensor::Type SparseTensorType = SparseTensor::Type::kDouble>
+void GetDenseSlice(const SparseTensor& tensor, SparseTensor::DenseVar *var,
+                   SparseTensor::PosType idx_pos,
+                   bool split_depths = false,
+                   bool omit_idx_dim = true) {
+  auto dense = std::get_if<SparseTensorType>(var);
+  if (omit_idx_dim) {
+    DCHECK_EQ(dense->Shape().size() + 1, tensor.Shape().size());
+    DCHECK_EQ(dense->Order().size() + 1, tensor.Order().size());
+  } else {
+    DCHECK_EQ(dense->Shape().size(), tensor.Shape().size());
+    DCHECK_EQ(dense->Order().size(), tensor.Order().size());
+  }
+  const bool has_data = !tensor.GetMatrixType().IsPattern();
+  auto posa = std::make_unique<SparseTensor::PosType[]>(tensor.NonDepthDims());
+  auto pos = SparseTensor::PosSpanMutable(posa.get(), tensor.NonDepthDims());
+  pos[tensor.IndexDim()] = idx_pos;
+  std::vector<bool> pos_mask(tensor.NonDepthDims());
+  if (omit_idx_dim) pos_mask[tensor.IndexDim()] = true;
+  auto data = std::get<SparseTensorType>(tensor.data());
+  tensor.ForNonZerosAtIndexPos(
+    [=, &tensor, &pos_mask](SparseTensor::PosSpan pos,
+                            SparseTensor::IdxType idx) {
+      std::size_t data_idx = idx * tensor.Depths();
+      for (uint32_t d = 0; d < tensor.Depths(); ++d)
+        dense->Set(has_data ? data[data_idx++] : 1, pos, pos_mask, d);
+      return true;
+    }, pos);
+}
+
 TEST(SparseTensorTests, Real5dSliceTestMtxFile) {
   auto file_path = TestDataFilePath("real_5d_test.mtx");
   CHECK(MatrixMarketIo::HasMtxFileExtension(file_path));
@@ -815,12 +845,16 @@ TEST(SparseTensorTests, Real5dSliceTestMtxFile) {
 
   auto dense = tsr.Dense(/*split_depths=*/false);
   tsr.GetDenseSlice(&dense, 0, /*split_depth=*/false, /*omit_idx_dim=*/false);
-  tsr.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  // same as:
+  // tsr.GetDenseSlice(&dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
+  GetDenseSlice(tsr, &dense, 1, /*split_depth=*/false, /*omit_idx_dim=*/false);
   EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense), tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
 
   dense = tsr.Dense(/*split_depths=*/true);
-  tsr.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  // same as:
+  // tsr.GetDenseSlice(&dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
+  GetDenseSlice(tsr, &dense, 1, /*split_depth=*/true, /*omit_idx_dim=*/false);
   tsr.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
   EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense), tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
