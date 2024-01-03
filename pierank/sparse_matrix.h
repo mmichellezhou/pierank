@@ -314,6 +314,7 @@ public:
     uint32_t non_idx_dim = this->NonIndexDim();
     PosType idx_pos = this->index_dim_order_ == 0 ? pos[idx_dim]
                                                   : (*zpos)[idx_dim];
+    if (idx_pos + 1 >= this->Index().size()) return true;
     for (IdxType i = this->Index(idx_pos); i < this->Index(idx_pos + 1); ++i) {
       pos[non_idx_dim] = this->Pos(i);
       if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
