@@ -516,35 +516,37 @@ public:
   }
 
   // Reads {rows, cols, nnz} from `is`
-  uint64_t ReadPieRankMatrixFileHeader(std::istream &is) {
-    uint64_t offset = 0;
+  absl::Status ReadPieRankMatrixFileHeader(std::istream &is,
+                                           uint64_t *offset = nullptr) {
     if (this->IsRoot()) {
-      if (EatString(&is, kPieRankMatrixFileMagicNumbers, &offset)) {
-        auto status = this->type_.Read(&is, &offset);
+      if (EatString(&is, kPieRankMatrixFileMagicNumbers, offset)) {
+        auto status = this->type_.Read(&is, offset);
         if (!status.ok()) LOG(FATAL) << status.message();
         DataType data_type;
-        status.Update(data_type.Read(&is, &offset));
+        status.Update(data_type.Read(&is, offset));
         if (!status.ok()) LOG(FATAL) << status.message();
         CHECK_EQ(data_type, StaticDataType());
     } else
       this->status_.Update(absl::InternalError("Bad file format"));
     }
-    this->shape_ = ReadUint64Vector(&is, &offset);
-    this->order_ = ReadUint32Vector(&is, &offset);
+    this->shape_ = ReadUint64Vector(&is, offset);
+    this->order_ = ReadUint32Vector(&is, offset);
     if (this->IsRoot())
       Config(this->Type(), this->Shape(), this->Order());
-    this->index_dim_order_ = ReadUint32(&is, &offset);
+    this->index_dim_order_ = ReadUint32(&is, offset);
     this->non_index_dim_order_ = this->index_dim_order_ + 1;
-    nnz_ = ReadUint64AndConvert<IdxType>(&is, &offset);
+    nnz_ = ReadUint64AndConvert<IdxType>(&is, offset);
     CHECK_LT(this->IndexDim(), this->NonDepthDims());
     if (!is)
       this->status_.Update(absl::InternalError("Error read PRM file header"));
 
-    return offset;
+    return absl::OkStatus();
   }
 
   friend std::istream &operator>>(std::istream &is, SparseMatrix &matrix) {
-    matrix.ReadPieRankMatrixFileHeader(is);
+    auto status = matrix.ReadPieRankMatrixFileHeader(is);
+    if (!status.ok())
+      LOG(FATAL) << "Error reading PRM header: " << status.message();
     is >> matrix.index_;
     is >> matrix.pos_;
     if constexpr (is_specialization_v<DataContainerType, FlexArray>) {
@@ -583,29 +585,46 @@ public:
     return absl::OkStatus();
   }
 
-  absl::Status MmapPieRankMatrixFile(const std::string &path) {
+  absl::Status Mmap(const std::string &path, uint64_t *offset = nullptr) {
     auto file_or = OpenReadFile(path);
     if (!file_or.ok()) return file_or.status();
     auto file = *std::move(file_or);
-    uint64_t offset = ReadPieRankMatrixFileHeader(file);
-    this->status_.Update(index_.Mmap(path, &offset));
-    this->status_.Update(pos_.Mmap(path, &offset));
-    auto size = ReadUint64AtOffset(&file, &offset);
-    if (size) {
-      CHECK(!this->type_.IsPattern() || !this->IsLeaf())
-          << "Only non-pattern or non-leaf matrices have data";
-      if (!file) {
-        LOG(ERROR) << "Error reading matrix data size";
-        return absl::InternalError(absl::StrCat("Error reading file: ", path));
-      }
-      size *= sizeof(value_type);
-      auto mmap = MmapReadOnlyFile(path, offset, size);
-      offset += size;
-      if (!mmap.ok()) return mmap.status();
-      this->data_mmap_ = *std::move(mmap);
-    } else
-      CHECK(this->type_.IsPattern()) << "Only pattern matrices have no data";
+    if (!Seek(&file, *offset))
+      return absl::InternalError(absl::StrCat("Error seeking file: ", path));
+
+    this->status_  = ReadPieRankMatrixFileHeader(file, offset);
+    this->status_.Update(index_.Mmap(path, offset));
+    this->status_.Update(pos_.Mmap(path, offset));
+    if constexpr (is_specialization_v<DataContainerType, SparseMatrix>) {
+      if (this->IsLeaf())
+        return absl::InternalError(absl::StrCat("Bad leaf in: ", path));
+      this->status_.Update(this->data_.Mmap(path, offset));
+    } else {
+      if (!this->IsLeaf())
+        return absl::InternalError(absl::StrCat("Bad non-leaf in: ", path));
+      auto size = ReadUint64AtOffset(&file, offset);
+      if (size) {
+        CHECK(!this->type_.IsPattern() || !this->IsLeaf())
+            << "Only non-pattern or non-leaf matrices have data";
+        if (!file) {
+          LOG(ERROR) << "Error reading matrix data size";
+          return absl::InternalError(absl::StrCat("Error reading file: ", path));
+        }
+        size *= sizeof(value_type);
+        auto mmap = MmapReadOnlyFile(path, *offset, size);
+        *offset += size;
+        if (!mmap.ok()) return mmap.status();
+        this->data_mmap_ = *std::move(mmap);
+      } else
+        CHECK(this->type_.IsPattern()) << "Only pattern matrices have no data";
+    }
+
     return this->status_;
+  }
+
+  absl::Status MmapPieRankMatrixFile(const std::string &path) {
+    uint64_t offset = 0;
+    return Mmap(path, &offset);
   }
 
   void UnMmap() {

@@ -858,4 +858,13 @@ TEST(SparseTensorTests, Real5dSliceTestMtxFile) {
   tsr.GetDenseSlice(&dense, 0, /*split_depth=*/true, /*omit_idx_dim=*/false);
   EXPECT_EQ(SparseMatrixVar::DenseNonDepthDims(dense), tsr.NonDepthDims());
   CheckDenseMatrix(DenseF64(dense), Real5dTestMatrixTestEntries());
+
+  auto prm_path = TestDataFilePath("real_5d_test.i1.prm");
+  SparseTensor tsr2(prm_path, /*mmap=*/false);
+  EXPECT_TRUE(tsr2.ok());
+  CheckSparseTensor(tsr2, Real5dTestMatrixTestEntries());
+
+  SparseTensor tsr3(prm_path, /*mmap=*/true);
+  EXPECT_TRUE(tsr3.ok());
+  CheckSparseTensor(tsr3, Real5dTestMatrixTestEntries());
 }
