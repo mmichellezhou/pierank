@@ -62,8 +62,10 @@ public:
   const value_type* data() const {
     if constexpr (is_specialization_v<DataContainerType, FlexArray>)
       return reinterpret_cast<const value_type*>(data_.data());
-    else
+    else if (data_mmap_.empty())
       return data_.data();
+    else
+      return reinterpret_cast<const value_type*>(data_mmap_.data());
   }
 
   uint32_t Depths() const { return shape_.back(); }
